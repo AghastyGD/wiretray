@@ -1,5 +1,6 @@
 mod app;
 mod tray;
+mod dbus;
 
 use anyhow::Result;
 
