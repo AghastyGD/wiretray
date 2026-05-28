@@ -1,0 +1,19 @@
+[package]
+name = "wiretray"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+thiserror = "2"
+
+tokio = { version = "1", features = ["full"] }
+
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+tray-icon = "0.14"
+
+zbus = "4"
+
+image = "0.25"
