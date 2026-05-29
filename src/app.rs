@@ -13,6 +13,13 @@ pub async fn run() -> Result<()> {
 
     tracing::info!("Wireless enabled: {}", enabled);
 
+    let devices = crate::dbus::network_manager::get_devices(&connection,)
+        .await?;
+
+    for device in devices {
+        tracing::info!("Found device: {}", device)
+    }
+
     Ok(())
 }
 
