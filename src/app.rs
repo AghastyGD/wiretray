@@ -16,8 +16,15 @@ pub async fn run() -> Result<()> {
     let devices = crate::dbus::network_manager::get_devices(&connection,)
         .await?;
 
-    for device in devices {
-        tracing::info!("Found device: {}", device)
+    for path in devices {
+        let device =
+            crate::dbus::device::load_device(
+                &connection,
+                path.as_str(),
+            )
+            .await?;
+
+        tracing::info!("{:?}", device);
     }
 
     Ok(())
