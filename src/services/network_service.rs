@@ -19,6 +19,10 @@ impl NetworkService {
         Ok(dbus::network_manager::wireless_enabled(&self.connection).await?)
     }
 
+    pub async fn wireless_hardware_enabled(&self) -> Result<bool> {
+        Ok(dbus::network_manager::wireless_hardware_enabled(&self.connection).await?)
+    }
+
     pub async fn devices(&self) -> Result<Vec<Device>> {
         let paths = dbus::network_manager::get_devices(&self.connection).await?;
 
@@ -31,5 +35,19 @@ impl NetworkService {
         }
 
         Ok(devices)
+    }
+
+    pub async fn wifi_devices(&self) -> Result<Vec<Device>> {
+        let devices = self.devices().await?;
+
+        Ok(devices
+            .into_iter()
+            .filter(|device| {
+                matches!(
+                    device.device_type,
+                    crate::models::device_type::DeviceType::Wifi
+                )
+            })
+            .collect())
     }
 }

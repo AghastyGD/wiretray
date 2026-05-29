@@ -16,6 +16,12 @@ pub async fn wireless_enabled(connection: &Connection) -> zbus::Result<bool> {
     proxy.get_property("WirelessEnabled").await
 }
 
+pub async fn wireless_hardware_enabled(connection: &Connection) -> zbus::Result<bool> {
+    let proxy = create_proxy(connection).await?;
+
+    proxy.get_property("WirelessHardwareEnabled").await
+}
+
 pub async fn get_devices(connection: &Connection) -> zbus::Result<Vec<OwnedObjectPath>> {
     let proxy = create_proxy(connection).await?;
 
