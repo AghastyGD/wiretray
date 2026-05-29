@@ -23,6 +23,10 @@ impl NetworkService {
         Ok(dbus::network_manager::wireless_hardware_enabled(&self.connection).await?)
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
     pub async fn devices(&self) -> Result<Vec<Device>> {
         let paths = dbus::network_manager::get_devices(&self.connection).await?;
 
