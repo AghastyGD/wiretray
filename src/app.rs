@@ -1,32 +1,28 @@
 use anyhow::Result;
 
+use crate::services::network_service::NetworkService;
+
 pub async fn run() -> Result<()> {
     tracing::info!("Application initialized");
 
-    let connection = crate::dbus::connection::system_connection()
-        .await?;
+    let network = NetworkService::new().await?;
 
     tracing::info!("Connected to system DBus");
 
-    let enabled = crate::dbus::network_manager::wireless_enabled(&connection,)
-        .await?;
+    let enabled = network.wireless_enabled().await?;
 
-    tracing::info!("Wireless enabled: {}", enabled);
+    tracing::info!(wireless_enabled = enabled, "Wireless status");
 
-    let devices = crate::dbus::network_manager::get_devices(&connection,)
-        .await?;
+    let devices = network.devices().await?;
 
-    for path in devices {
-        let device =
-            crate::dbus::device::load_device(
-                &connection,
-                path.as_str(),
-            )
-            .await?;
-
-        tracing::info!("{:?}", device);
+    for device in devices {
+        tracing::info!(
+            interface = device.interface,
+            device_type = ?device.device_type,
+            state = ?device.state,
+            "Device discovered"
+        );
     }
 
     Ok(())
 }
-

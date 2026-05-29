@@ -1,7 +1,8 @@
 mod app;
-mod tray;
 mod dbus;
 mod models;
+mod services;
+mod tray;
 
 use anyhow::Result;
 

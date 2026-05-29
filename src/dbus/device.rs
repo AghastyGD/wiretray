@@ -1,12 +1,8 @@
-use zbus::Proxy;
-use zbus::Connection;
+use zbus::{Connection, Proxy};
 
-use crate::models::device::Device;
+use crate::models::{device::Device, device_state::DeviceState, device_type::DeviceType};
 
-pub async fn load_device(
-    connection: &Connection,
-    path: &str,
-) -> zbus::Result<Device> {
+pub async fn load_device(connection: &Connection, path: &str) -> zbus::Result<Device> {
     let proxy = Proxy::new(
         connection,
         "org.freedesktop.NetworkManager",
@@ -24,7 +20,7 @@ pub async fn load_device(
     Ok(Device {
         path: path.to_string(),
         interface,
-        device_type,
-        state,
+        device_type: DeviceType::from(device_type),
+        state: DeviceState::from(state),
     })
 }
