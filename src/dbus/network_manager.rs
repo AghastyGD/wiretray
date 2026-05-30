@@ -18,12 +18,14 @@ pub async fn create_proxy(connection: &Connection) -> zbus::Result<Proxy<'_>> {
     .await
 }
 
+#[allow(dead_code)]
 pub async fn wireless_enabled(connection: &Connection) -> zbus::Result<bool> {
     let proxy = create_proxy(connection).await?;
 
     proxy.get_property("WirelessEnabled").await
 }
 
+#[allow(dead_code)]
 pub async fn wireless_hardware_enabled(connection: &Connection) -> zbus::Result<bool> {
     let proxy = create_proxy(connection).await?;
 

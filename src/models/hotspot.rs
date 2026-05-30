@@ -1,5 +1,6 @@
 use super::device::Device;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotspotBackend {
     NetworkManager,
@@ -12,6 +13,7 @@ pub struct HotspotStartRequest {
     pub passphrase: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HotspotRadioState {
     pub software_enabled: bool,
@@ -19,11 +21,13 @@ pub struct HotspotRadioState {
 }
 
 impl HotspotRadioState {
+    #[allow(dead_code)]
     pub fn is_available(self) -> bool {
         self.software_enabled && self.hardware_enabled
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct HotspotCapability {
     pub backend: HotspotBackend,
@@ -65,6 +69,7 @@ pub struct ActiveHotspot {
 }
 
 impl HotspotCapability {
+    #[allow(dead_code)]
     pub fn is_supported(&self) -> bool {
         self.radio_state.hardware_enabled && !self.wifi_devices.is_empty()
     }
