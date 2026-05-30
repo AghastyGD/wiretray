@@ -189,7 +189,7 @@ fn validate_start_request(request: &HotspotStartRequest) -> Result<()> {
         bail!("Hotspot interface is required");
     }
 
-    let ssid_len = request.ssid.as_bytes().len();
+    let ssid_len = request.ssid.len();
     if ssid_len == 0 || ssid_len > 32 {
         bail!("Hotspot SSID must be between 1 and 32 bytes");
     }
