@@ -12,7 +12,7 @@ I used it for a while and it worked well, but one thing always bothered me: ever
 
 I wanted a solution that could stay in the system tray and make hotspot management available with a couple of clicks.
 
-`wiretray` also serves as a way for me to learn more about D-Bus, NetworkManager, and desktop application development in Rust.
+`wiretray` began as an experiment with D-Bus and NetworkManager, but quickly grew into a tool aimed at simplifying hotspot management on Linux.
 
 The long-term goal is simple: make hotspot management feel like any other background service on Linux.
 
@@ -62,7 +62,7 @@ Provides communication with NetworkManager through D-Bus.
 
 ## Requirements
 
-`wiretray currently requires:
+`wiretray` currently requires:
 
 * Linux
 * NetworkManager
