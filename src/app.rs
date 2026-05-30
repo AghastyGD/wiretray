@@ -60,10 +60,10 @@ pub async fn run() -> Result<()> {
             interface = active_hotspot.interface,
             id = active_hotspot.id,
             state = ?active_hotspot.state,
-            "Active WireTray hotspot"
+            "Active wiretray hotspot"
         );
     } else {
-        tracing::info!("Active WireTray hotspot not found");
+        tracing::info!("Active wiretray hotspot not found");
     }
 
     handle_hotspot_test_action(&hotspot).await?;

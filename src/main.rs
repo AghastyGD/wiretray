@@ -10,7 +10,7 @@ use anyhow::Result;
 async fn main() -> Result<()> {
     setup_logging();
 
-    tracing::info!("Starting WireTray...");
+    tracing::info!("Starting wiretray...");
 
     app::run().await?;
 
