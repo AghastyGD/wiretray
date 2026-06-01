@@ -1,4 +1,3 @@
-mod app;
 mod dbus;
 mod models;
 mod services;
@@ -6,13 +5,18 @@ mod tray;
 
 use anyhow::Result;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     setup_logging();
 
     tracing::info!("Starting wiretray...");
 
-    app::run().await?;
+    gtk::init()?;
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    tray::run(rt.handle().clone())?;
 
     Ok(())
 }

@@ -33,12 +33,14 @@ impl HotspotService {
         })
     }
 
+    #[allow(dead_code)]
     pub fn backend(&self) -> HotspotBackend {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(_) => HotspotBackend::NetworkManager,
         }
     }
 
+    #[allow(dead_code)]
     pub async fn radio_state(&self) -> Result<HotspotRadioState> {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(network) => Ok(HotspotRadioState {
@@ -54,6 +56,7 @@ impl HotspotService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn capability(&self) -> Result<HotspotCapability> {
         Ok(HotspotCapability {
             backend: self.backend(),
@@ -62,6 +65,7 @@ impl HotspotService {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn active_hotspot(&self, interface: Option<&str>) -> Result<Option<ActiveHotspot>> {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(network) => {

@@ -15,10 +15,12 @@ impl NetworkService {
         Ok(Self { connection })
     }
 
+    #[allow(dead_code)]
     pub async fn wireless_enabled(&self) -> Result<bool> {
         Ok(dbus::network_manager::wireless_enabled(&self.connection).await?)
     }
 
+    #[allow(dead_code)]
     pub async fn wireless_hardware_enabled(&self) -> Result<bool> {
         Ok(dbus::network_manager::wireless_hardware_enabled(&self.connection).await?)
     }

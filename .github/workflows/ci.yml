@@ -23,7 +23,8 @@ jobs:
             pkg-config \
             libglib2.0-dev \
             libgtk-3-dev \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            libxdo-dev
 
       - name: Check formatting
         run: cargo fmt --all -- --check

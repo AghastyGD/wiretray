@@ -1,8 +1,19 @@
-# wiretray
+<div align="center">
 
-A Linux hotspot manager written in Rust.
+<img src="assets/icons/app/logo.png" width="180">
 
-`wiretray` uses D-Bus and NetworkManager to create and manage Wi-Fi hotspots, with a focus on simple tray-based controls.
+# Wiretray
+
+**A modern Wi-Fi hotspot manager for Linux.**
+
+![CI](https://github.com/aghastygd/wiretray/actions/workflows/ci.yml/badge.svg)
+![License](https://img.shields.io/github/license/aghastygd/wiretray)
+![Issues](https://img.shields.io/github/issues/aghastygd/wiretray)
+</div>
+
+Wiretray is a Linux hotspot manager focused on simplicity and quick access from the system tray.
+
+It currently integrates with NetworkManager through D-Bus.
 
 ## Motivation
 
@@ -12,7 +23,7 @@ I used it for a while and it worked well, but one thing always bothered me: ever
 
 I wanted a solution that could stay in the system tray and make hotspot management available with a couple of clicks.
 
-`wiretray` began as an experiment with D-Bus and NetworkManager, but quickly grew into a tool aimed at simplifying hotspot management on Linux.
+Wiretray began as an experiment, but quickly evolved into a project focused on improving the Linux hotspot experience.
 
 The long-term goal is simple: make hotspot management feel like any other background service on Linux.
 
@@ -34,31 +45,6 @@ Currently in progress:
 * Tray integration
 * Improved hotspot state handling
 * Better error reporting
-
-## Architecture
-
-```text
-wiretray
-├── Tray UI
-├── Hotspot Service
-├── Network Service
-├── D-Bus Layer
-└── NetworkManager
-```
-
-### Components
-
-#### NetworkService
-
-Responsible for device discovery and network state information.
-
-#### HotspotService
-
-Handles hotspot lifecycle operations such as starting, stopping, and monitoring hotspot state.
-
-#### D-Bus Layer
-
-Provides communication with NetworkManager through D-Bus.
 
 ## Requirements
 
