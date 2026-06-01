@@ -33,6 +33,7 @@ The project is still under active development.
 
 Implemented so far:
 
+* System tray integration
 * Wi-Fi device discovery
 * Hotspot creation through NetworkManager
 * Hotspot shutdown
@@ -42,9 +43,9 @@ Implemented so far:
 
 Currently in progress:
 
-* Tray integration
+* Desktop configuration interface
 * Improved hotspot state handling
-* Better error reporting
+* Better error reporting 
 
 ## Requirements
 
