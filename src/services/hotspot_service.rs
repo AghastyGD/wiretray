@@ -65,7 +65,6 @@ impl HotspotService {
         })
     }
 
-    #[allow(dead_code)]
     pub async fn active_hotspot(&self, interface: Option<&str>) -> Result<Option<ActiveHotspot>> {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(network) => {
