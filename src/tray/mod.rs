@@ -21,10 +21,30 @@ enum HotspotUpdate {
 pub fn run(handle: tokio::runtime::Handle) -> Result<()> {
     let (tray_menu, items) = menu::build()?;
 
+    let hotspot_active = handle.block_on(async {
+        match HotspotService::new().await {
+            Ok(svc) => match svc.active_hotspot(None).await {
+                Ok(active) => active.is_some(),
+                Err(e) => {
+                    tracing::warn!("Failed to determine initial hotspot state: {e:#}");
+                    false
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to initialize hotspot service: {e:#}");
+                false
+            }
+        }
+    });
+
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu))
         .with_tooltip("Wiretray - Hotspot Manager")
-        .with_icon(load_icon(ICON_INACTIVE))
+        .with_icon(load_icon(if hotspot_active {
+            ICON_ACTIVE
+        } else {
+            ICON_INACTIVE
+        }))
         .build()
         .context("Failed to create tray icon")?;
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use uuid::Uuid;
@@ -15,6 +15,8 @@ use crate::models::{
 use super::network_service::NetworkService;
 
 const HOTSPOT_ID_PREFIX: &str = "wiretray-hotspot";
+const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(30);
+const ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 enum HotspotBackendHandle {
     NetworkManager(NetworkService),
@@ -65,7 +67,6 @@ impl HotspotService {
         })
     }
 
-    #[allow(dead_code)]
     pub async fn active_hotspot(&self, interface: Option<&str>) -> Result<Option<ActiveHotspot>> {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(network) => {
@@ -107,6 +108,8 @@ impl HotspotService {
                     )
                     .await?;
 
+                wait_for_activation(network.connection(), active_connection_path.as_str()).await?;
+
                 let active_connection = crate::dbus::active_connection::load_active_connection(
                     network.connection(),
                     active_connection_path.as_str(),
@@ -141,6 +144,42 @@ impl HotspotService {
                 Ok(Some(active_hotspot))
             }
         }
+    }
+}
+
+async fn wait_for_activation(
+    connection: &zbus::Connection,
+    active_connection_path: &str,
+) -> Result<()> {
+    use tokio::time::{sleep, timeout};
+
+    match timeout(ACTIVATION_TIMEOUT, async {
+        loop {
+            let info = crate::dbus::active_connection::load_active_connection(
+                connection,
+                active_connection_path,
+            )
+            .await
+            .context("Failed to read active connection state")?;
+
+            match HotspotConnectionState::from(info.state) {
+                HotspotConnectionState::Activated => return Ok(()),
+                HotspotConnectionState::Deactivating | HotspotConnectionState::Deactivated => {
+                    bail!("Hotspot activation failed: connection deactivated unexpectedly");
+                }
+                _ => {
+                    sleep(ACTIVATION_POLL_INTERVAL).await;
+                }
+            }
+        }
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => bail!(
+            "Hotspot activation timed out after {}s",
+            ACTIVATION_TIMEOUT.as_secs()
+        ),
     }
 }
 
