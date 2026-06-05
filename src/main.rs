@@ -1,9 +1,6 @@
-mod dbus;
-mod models;
-mod services;
-mod tray;
-
 use anyhow::Result;
+
+use wiretray::tray;
 
 fn main() -> Result<()> {
     setup_logging();

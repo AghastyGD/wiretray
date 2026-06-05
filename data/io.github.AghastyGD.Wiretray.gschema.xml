@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<schemalist>
+  <schema 
+    id="io.github.AghastyGD.Wiretray"
+    path="/io/github/AghastyGD/Wiretray/">    
+    
+    <key name="ssid" type="s">
+      <default>''</default>
+      <summary>Hotspot SSID</summary>
+    </key>
+
+    <key name="password" type="s">
+      <default>''</default>
+      <summary>Hotspot password</summary>
+    </key>
+  </schema>
+</schemalist>
