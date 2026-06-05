@@ -1,102 +1,128 @@
-use std::{sync::mpsc, time::Duration};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tray_icon::{TrayIconBuilder, menu::MenuEvent};
+use ksni::{MenuItem, Tray, TrayMethods, menu::StandardItem};
+use tokio::sync::mpsc;
 
-use crate::{models::hotspot::HotspotStartRequest, services::hotspot_service::HotspotService};
-
-pub mod menu;
-
-const DEFAULT_SSID: &str = "Wiretray";
-const DEFAULT_PASSPHRASE: &str = "wiretray1234";
+use crate::{
+    models::hotspot::HotspotConfig, services::hotspot_service::HotspotService,
+    settings::service::SettingsService,
+};
 
 const ICON_INACTIVE: &[u8] = include_bytes!("../../assets/icons/tray/inactive.png");
 const ICON_ACTIVE: &[u8] = include_bytes!("../../assets/icons/tray/active.png");
 
-enum HotspotUpdate {
-    Started,
-    Stopped,
+enum TrayCommand {
+    SetActive(bool),
 }
 
-pub fn run(handle: tokio::runtime::Handle) -> Result<()> {
-    let (tray_menu, items) = menu::build()?;
+struct WireTray {
+    active: bool,
+    tx: Arc<mpsc::Sender<TrayCommand>>,
+}
 
-    let hotspot_active = handle.block_on(async {
-        match HotspotService::new().await {
-            Ok(svc) => match svc.active_hotspot(None).await {
-                Ok(active) => active.is_some(),
-                Err(e) => {
-                    tracing::warn!("Failed to determine initial hotspot state: {e:#}");
-                    false
-                }
-            },
-            Err(e) => {
-                tracing::warn!("Failed to initialize hotspot service: {e:#}");
-                false
-            }
-        }
-    });
+impl Tray for WireTray {
+    fn id(&self) -> String {
+        env!("CARGO_PKG_NAME").into()
+    }
 
-    let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(tray_menu))
-        .with_tooltip("Wiretray - Hotspot Manager")
-        .with_icon(load_icon(if hotspot_active {
+    fn title(&self) -> String {
+        "Wiretray".into()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        vec![load_icon(if self.active {
             ICON_ACTIVE
         } else {
             ICON_INACTIVE
-        }))
-        .build()
-        .context("Failed to create tray icon")?;
+        })]
+    }
 
-    let (update_tx, update_rx) = mpsc::channel::<HotspotUpdate>();
-    let menu_rx = MenuEvent::receiver();
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            title: "Wiretray - Hotspot Manager".into(),
+            ..Default::default()
+        }
+    }
 
-    gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
-        while let Ok(update) = update_rx.try_recv() {
-            let icon = match update {
-                HotspotUpdate::Started => load_icon(ICON_ACTIVE),
-                HotspotUpdate::Stopped => load_icon(ICON_INACTIVE),
-            };
-            if let Err(e) = tray.set_icon(Some(icon)) {
-                tracing::warn!("Failed to update tray icon: {e}");
+    fn menu(&self) -> Vec<MenuItem<Self>> {
+        let tx_start = Arc::clone(&self.tx);
+        let tx_stop = Arc::clone(&self.tx);
+        vec![
+            StandardItem {
+                label: "Start Hotspot".into(),
+                activate: Box::new(move |_tray: &mut Self| {
+                    let tx = Arc::clone(&tx_start);
+                    tokio::spawn(async move {
+                        match do_start_hotspot().await {
+                            Ok(()) => {
+                                let _ = tx.send(TrayCommand::SetActive(true)).await;
+                            }
+                            Err(e) => tracing::error!("Failed to start hotspot: {e:#}"),
+                        }
+                    });
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "Stop Hotspot".into(),
+                activate: Box::new(move |_tray: &mut Self| {
+                    let tx = Arc::clone(&tx_stop);
+                    tokio::spawn(async move {
+                        match do_stop_hotspot().await {
+                            Ok(()) => {
+                                let _ = tx.send(TrayCommand::SetActive(false)).await;
+                            }
+                            Err(e) => tracing::error!("Failed to stop hotspot: {e:#}"),
+                        }
+                    });
+                }),
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            StandardItem {
+                label: "Quit".into(),
+                activate: Box::new(|_| std::process::exit(0)),
+                ..Default::default()
+            }
+            .into(),
+        ]
+    }
+}
+
+pub async fn run() -> Result<()> {
+    let initial_active = match HotspotService::new().await {
+        Ok(svc) => match svc.active_hotspot(None).await {
+            Ok(active) => active.is_some(),
+            Err(e) => {
+                tracing::warn!("Failed to determine initial hotspot state: {e:#}");
+                false
+            }
+        },
+        Err(e) => {
+            tracing::warn!("Failed to initialize hotspot service: {e:#}");
+            false
+        }
+    };
+
+    let (tx, mut rx) = mpsc::channel::<TrayCommand>(8);
+    let tray = WireTray {
+        active: initial_active,
+        tx: Arc::new(tx),
+    };
+    let handle = tray.spawn().await.context("Failed to create tray icon")?;
+
+    tracing::info!("Tray running");
+
+    while let Some(cmd) = rx.recv().await {
+        match cmd {
+            TrayCommand::SetActive(active) => {
+                handle.update(|t: &mut WireTray| t.active = active).await;
             }
         }
-
-        while let Ok(event) = menu_rx.try_recv() {
-            if event.id == items.quit {
-                gtk::main_quit();
-                return gtk::glib::ControlFlow::Break;
-            }
-            if event.id == items.start_hotspot {
-                let h = handle.clone();
-                let tx = update_tx.clone();
-                h.spawn(async move {
-                    match do_start_hotspot().await {
-                        Ok(()) => {
-                            let _ = tx.send(HotspotUpdate::Started);
-                        }
-                        Err(e) => tracing::error!("Failed to start hotspot: {e:#}"),
-                    }
-                });
-            }
-            if event.id == items.stop_hotspot {
-                let h = handle.clone();
-                let tx = update_tx.clone();
-                h.spawn(async move {
-                    match do_stop_hotspot().await {
-                        Ok(()) => {
-                            let _ = tx.send(HotspotUpdate::Stopped);
-                        }
-                        Err(e) => tracing::error!("Failed to stop hotspot: {e:#}"),
-                    }
-                });
-            }
-        }
-
-        gtk::glib::ControlFlow::Continue
-    });
-
-    gtk::main();
+    }
 
     Ok(())
 }
@@ -112,13 +138,9 @@ async fn do_start_hotspot() -> Result<()> {
         .context("No Wi-Fi device available for hotspot")?
         .interface;
 
-    let req = HotspotStartRequest {
-        interface,
-        ssid: DEFAULT_SSID.to_string(),
-        passphrase: Some(DEFAULT_PASSPHRASE.to_string()),
-    };
+    let config = load_hotspot_config(interface);
 
-    let active = hotspot.start(req).await?;
+    let active = hotspot.start(config).await?;
     tracing::info!(
         interface = active.interface,
         state = ?active.state,
@@ -130,14 +152,61 @@ async fn do_start_hotspot() -> Result<()> {
 async fn do_stop_hotspot() -> Result<()> {
     let hotspot = HotspotService::new().await?;
     let stopped = hotspot.stop(None).await?;
-    tracing::info!(stopped = stopped.is_some(), "Hotspot stop requested");
+    tracing::info!(stopped = stopped.is_some(), "Hotspot stopped");
     Ok(())
 }
 
-fn load_icon(png_data: &[u8]) -> tray_icon::Icon {
+fn load_hotspot_config(interface: String) -> HotspotConfig {
+    match SettingsService::new().load() {
+        Ok(s) => HotspotConfig {
+            interface,
+            ssid: if s.ssid.is_empty() {
+                system_hostname()
+            } else {
+                s.ssid
+            },
+            passphrase: if s.passphrase.is_empty() {
+                None
+            } else {
+                Some(s.passphrase)
+            },
+        },
+        Err(e) => {
+            tracing::warn!("Failed to load settings: {e:#}");
+            HotspotConfig {
+                interface,
+                ssid: system_hostname(),
+                passphrase: None,
+            }
+        }
+    }
+}
+
+fn system_hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .or_else(|_| std::fs::read_to_string("/proc/sys/kernel/hostname"))
+        .map(|s| s.trim().to_string())
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Wiretray".to_string())
+}
+
+fn load_icon(png_data: &[u8]) -> ksni::Icon {
     let img = image::load_from_memory(png_data)
         .expect("valid PNG data")
         .into_rgba8();
-    let (w, h) = img.dimensions();
-    tray_icon::Icon::from_rgba(img.into_raw(), w, h).expect("valid icon data")
+    let (width, height) = img.dimensions();
+    // StatusNotifierItem expects ARGB32 (big-endian 0xAARRGGBB)
+    let argb: Vec<u8> = img
+        .chunks_exact(4)
+        .flat_map(|px| {
+            let [r, g, b, a] = px else { unreachable!() };
+            [*a, *r, *g, *b]
+        })
+        .collect();
+    ksni::Icon {
+        width: width as i32,
+        height: height as i32,
+        data: argb,
+    }
 }

@@ -10,9 +10,9 @@
       <summary>Hotspot SSID</summary>
     </key>
 
-    <key name="password" type="s">
+    <key name="passphrase" type="s">
       <default>''</default>
-      <summary>Hotspot password</summary>
+      <summary>Hotspot passphrase</summary>
     </key>
   </schema>
 </schemalist>

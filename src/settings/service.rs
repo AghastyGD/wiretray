@@ -1,13 +1,13 @@
 use anyhow::Result;
-use gtk::gio::Settings;
-use gtk::prelude::SettingsExt;
+use gio::Settings;
+use gio::prelude::SettingsExt;
 
 use super::hotspot_settings::HotspotSettings;
 
 const SCHEMA_ID: &str = "io.github.AghastyGD.Wiretray";
 
 const KEY_SSID: &str = "ssid";
-const KEY_PASSWORD: &str = "password";
+const KEY_PASSPHRASE: &str = "passphrase";
 
 pub struct SettingsService {
     settings: Settings,
@@ -29,13 +29,14 @@ impl SettingsService {
     pub fn load(&self) -> Result<HotspotSettings> {
         Ok(HotspotSettings {
             ssid: self.settings.string(KEY_SSID).to_string(),
-            password: self.settings.string(KEY_PASSWORD).to_string(),
+            passphrase: self.settings.string(KEY_PASSPHRASE).to_string(),
         })
     }
     pub fn save(&self, settings: &HotspotSettings) -> Result<()> {
         self.settings.set_string(KEY_SSID, &settings.ssid)?;
 
-        self.settings.set_string(KEY_PASSWORD, &settings.password)?;
+        self.settings
+            .set_string(KEY_PASSPHRASE, &settings.passphrase)?;
 
         Ok(())
     }
