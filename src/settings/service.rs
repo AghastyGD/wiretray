@@ -13,6 +13,12 @@ pub struct SettingsService {
     settings: Settings,
 }
 
+impl Default for SettingsService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SettingsService {
     pub fn new() -> Self {
         Self {
