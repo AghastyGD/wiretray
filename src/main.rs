@@ -2,20 +2,13 @@ use anyhow::Result;
 
 use wiretray::tray;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     setup_logging();
 
-    tracing::info!("Starting wiretray...");
+    tracing::info!("Starting Wiretray...");
 
-    gtk::init()?;
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-
-    tray::run(rt.handle().clone())?;
-
-    Ok(())
+    tray::run().await
 }
 
 fn setup_logging() {
