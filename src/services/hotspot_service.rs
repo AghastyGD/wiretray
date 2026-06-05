@@ -7,8 +7,8 @@ use zbus::zvariant::Value;
 use crate::models::{
     device::Device,
     hotspot::{
-        ActiveHotspot, HotspotBackend, HotspotCapability, HotspotConnectionState,
-        HotspotRadioState, HotspotStartRequest,
+        ActiveHotspot, HotspotBackend, HotspotCapability, HotspotConfig, HotspotConnectionState,
+        HotspotRadioState,
     },
 };
 
@@ -75,7 +75,7 @@ impl HotspotService {
         }
     }
 
-    pub async fn start(&self, request: HotspotStartRequest) -> Result<ActiveHotspot> {
+    pub async fn start(&self, request: HotspotConfig) -> Result<ActiveHotspot> {
         validate_start_request(&request)?;
 
         match &self.backend {
@@ -227,7 +227,7 @@ async fn find_active_hotspot(
     Ok(None)
 }
 
-fn validate_start_request(request: &HotspotStartRequest) -> Result<()> {
+fn validate_start_request(request: &HotspotConfig) -> Result<()> {
     if request.interface.trim().is_empty() {
         bail!("Hotspot interface is required");
     }
@@ -257,7 +257,7 @@ fn hotspot_connection_id(interface: &str) -> String {
 }
 
 fn build_hotspot_settings(
-    request: &HotspotStartRequest,
+    request: &HotspotConfig,
     connection_id: &str,
     connection_uuid: &str,
 ) -> crate::dbus::network_manager::ConnectionSettings {

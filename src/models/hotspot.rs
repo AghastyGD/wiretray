@@ -7,7 +7,7 @@ pub enum HotspotBackend {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HotspotStartRequest {
+pub struct HotspotConfig {
     pub interface: String,
     pub ssid: String,
     pub passphrase: Option<String>,
