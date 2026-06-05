@@ -19,11 +19,11 @@ It currently integrates with NetworkManager through D-Bus.
 
 This project was inspired by [Linux WiFi Hotspot](https://github.com/lakinduakash/linux-wifi-hotspot).
 
-I used it for a while and it worked well, but one thing always bothered me: every time I wanted to enable or disable the hotspot, I had to open the application window first.
+I used it for a while and had a good experience with it, but one thing always bothered me: every time I wanted to enable or disable the hotspot, I had to open the application window first.
 
 I wanted a solution that could stay in the system tray and make hotspot management available with a couple of clicks.
 
-Wiretray began as an experiment, but quickly evolved into a project focused on improving the Linux hotspot experience.
+wiretray began as an experiment, but quickly evolved into a tool I use daily for managing hotspots on Linux.
 
 The long-term goal is simple: make hotspot management feel like any other background service on Linux.
 
@@ -33,51 +33,42 @@ The project is still under active development.
 
 Implemented so far:
 
-* System tray integration
-* Wi-Fi device discovery
-* Hotspot creation through NetworkManager
-* Hotspot shutdown
-* Hotspot status detection
-* D-Bus integration
-* Async services powered by Tokio
+- [x] System tray integration
+    
+- [x] Wi-Fi device discovery
+    
+- [x] Hotspot creation through NetworkManager
+    
+- [x] Hotspot shutdown
+    
+- [x] Hotspot status detection
+    
+- [x] NetworkManager integration
+    
+- [x] Async services powered by Tokio
+    
 
 Currently in progress:
 
-* Desktop configuration interface
-* Improved hotspot state handling
-* Better error reporting 
+- Desktop configuration interface
+    
+- Improved hotspot state handling
+    
+- Better error reporting
+    
 
 ## Requirements
 
-`wiretray` currently requires:
-
-* Linux
-* NetworkManager
-* D-Bus
-
-Unsupported environments:
-
-* WSL
-* Systems without NetworkManager
-* Systems without Wi-Fi hardware
+- Linux
+    
+- NetworkManager
+    
+- A Wi-Fi adapter with Access Point (AP) support
+    
 
 ## Building
 
-Install the required system packages before building.
-
-**Debian / Ubuntu:**
-
-```bash
-sudo apt install libgtk-3-dev libxdo-dev libappindicator3-dev
-```
-
-**Arch Linux / Manjaro:**
-
-```bash
-sudo pacman -S gtk3 xdotool libappindicator-gtk3
-```
-
-Then build with Cargo:
+Build the project with Cargo:
 
 ```bash
 cargo build
@@ -113,14 +104,20 @@ cargo test
 
 Planned work includes:
 
-* Tray controls
-* QR code generation
-* Connected client monitoring
-* Hotspot notifications
-* Wi-Fi capability detection
-* Advanced hotspot configuration
-* Concurrent AP + Client support
-* Alternative hotspot backends
+- QR code generation
+    
+- Connected client monitoring
+    
+- Hotspot notifications
+    
+- Wi-Fi capability detection
+    
+- Advanced hotspot configuration
+    
+- Concurrent AP + Client support
+    
+- Alternative hotspot backends
+    
 
 As with most side projects, priorities may change over time.
 
@@ -130,4 +127,4 @@ Issues, suggestions, and pull requests are welcome.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the MIT License.
