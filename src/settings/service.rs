@@ -35,7 +35,8 @@ impl SettingsService {
     pub fn save(&self, settings: &HotspotSettings) -> Result<()> {
         self.settings.set_string(KEY_SSID, &settings.ssid)?;
 
-        self.settings.set_string(KEY_PASSPHRASE, &settings.passphrase)?;
+        self.settings
+            .set_string(KEY_PASSPHRASE, &settings.passphrase)?;
 
         Ok(())
     }

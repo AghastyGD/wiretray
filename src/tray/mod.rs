@@ -131,4 +131,3 @@ fn load_icon(png_data: &[u8]) -> ksni::Icon {
         data: argb,
     }
 }
-

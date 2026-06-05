@@ -1,8 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    models::hotspot::HotspotConfig,
-    services::hotspot_service::HotspotService,
+    models::hotspot::HotspotConfig, services::hotspot_service::HotspotService,
     settings::service::SettingsService,
 };
 
