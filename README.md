@@ -10,10 +10,9 @@
 ![License](https://img.shields.io/github/license/aghastygd/wiretray)
 ![Issues](https://img.shields.io/github/issues/aghastygd/wiretray)
 </div>
+Wiretray is a Linux hotspot manager with system tray integration and a desktop configuration interface.
 
-Wiretray is a Linux hotspot manager focused on simplicity and quick access from the system tray.
-
-It currently integrates with NetworkManager through D-Bus.
+It integrates with NetworkManager to create and manage Wi-Fi hotspots.
 
 ## Motivation
 
@@ -34,23 +33,20 @@ The project is still under active development.
 Implemented so far:
 
 - [x] System tray integration
+
+- [x] Desktop configuration interface
     
 - [x] Wi-Fi device discovery
     
-- [x] Hotspot creation through NetworkManager
+- [x] Hotspot creation and management
     
-- [x] Hotspot shutdown
-    
-- [x] Hotspot status detection
-    
-- [x] NetworkManager integration
-    
-- [x] Async services powered by Tokio
+- [x] Hotspot status monitoring
+
+- [x] Hotspot settings persistence
+
     
 
 Currently in progress:
-
-- Desktop configuration interface
     
 - Improved hotspot state handling
     
