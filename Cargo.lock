@@ -2570,6 +2570,7 @@ name = "wiretray"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "gio 0.20.12",
  "gtk4",
  "image",

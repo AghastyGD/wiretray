@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/icons/app/logo.png" width="180">
+<img src="assets/icons/app/io.github.AghastyGD.Wiretray.png" width="180">
 
 # Wiretray
 

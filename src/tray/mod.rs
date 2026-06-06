@@ -80,6 +80,17 @@ impl Tray for WireTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
+                label: "Settings".into(),
+                activate: Box::new(|_: &mut Self| {
+                    if let Err(err) = std::process::Command::new("wiretray-settings").spawn() {
+                        tracing::error!("Failed to launch settings window: {err}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            StandardItem {
                 label: "Quit".into(),
                 activate: Box::new(|_| std::process::exit(0)),
                 ..Default::default()
@@ -93,6 +104,24 @@ pub async fn run() -> Result<()> {
     let initial_active = hotspot_app::is_active().await;
 
     let (tx, mut rx) = mpsc::channel::<TrayCommand>(8);
+
+    let tx_poll = tx.clone();
+
+    tokio::spawn(async move {
+        let mut last_state = initial_active;
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            let active = hotspot_app::is_active().await;
+
+            if active != last_state {
+                let _ = tx_poll.send(TrayCommand::SetActive(active)).await;
+                last_state = active;
+            }
+        }
+    });
+
     let tray = WireTray {
         active: initial_active,
         tx: Arc::new(tx),
