@@ -61,19 +61,71 @@ Currently in progress:
     
 - A Wi-Fi adapter with Access Point (AP) support
     
+## Dependencies
+
+Install the required development packages for your distribution.
+
+### Debian / Ubuntu
+
+```bash
+sudo apt install \
+  libgtk-4-dev \
+  meson \
+  desktop-file-utils \
+  gcc \
+  gtk-update-icon-cache
+```
+
+### Fedora
+
+```bash
+sudo dnf install \
+  gtk4-devel \
+  meson \
+  desktop-file-utils \
+  gcc \
+  glib-compile-resources \
+  gtk4-update-icon-cache \
+  update-desktop-database
+```
+
+### Arch Linux
+
+```bash
+sudo pacman -S \
+  gtk4 \
+  meson \
+  desktop-file-utils \
+  gcc
+```
 
 ## Building
 
-Build the project with Cargo:
+Build all binaries:
 
 ```bash
 cargo build
 ```
 
-## Running
+Or build a specific binary:
 
 ```bash
-cargo run
+cargo build --bin wiretray
+cargo build --bin wiretray_settings
+```
+
+## Running
+
+Start the tray application:
+
+```bash
+cargo run --bin wiretray
+```
+
+Launch the settings application directly:
+
+```bash
+cargo run --bin wiretray_settings
 ```
 
 ## Development
