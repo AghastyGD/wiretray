@@ -27,16 +27,21 @@ impl SettingsService {
     }
 
     pub fn load(&self) -> Result<HotspotSettings> {
-        Ok(HotspotSettings {
+        let settings = HotspotSettings {
             ssid: self.settings.string(KEY_SSID).to_string(),
             passphrase: self.settings.string(KEY_PASSPHRASE).to_string(),
-        })
+        };
+
+        Ok(settings)
     }
+
     pub fn save(&self, settings: &HotspotSettings) -> Result<()> {
         self.settings.set_string(KEY_SSID, &settings.ssid)?;
 
         self.settings
             .set_string(KEY_PASSPHRASE, &settings.passphrase)?;
+
+        gio::Settings::sync(); // Ensure changes are flushed before short-lived processes exit.
 
         Ok(())
     }
