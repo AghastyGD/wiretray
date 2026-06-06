@@ -3,9 +3,12 @@ name = "wiretray"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "wiretray-settings"
+path = "src/bin/wiretray_settings.rs"
+
 [dependencies]
 anyhow = "1"
-thiserror = "2"
 
 tokio = { version = "1", features = ["full"] }
 
@@ -19,3 +22,4 @@ zbus = "4"
 uuid = { version = "1", features = ["v4"] }
 
 image = "0.25"
+gtk = { version = "0.11.3", package = "gtk4", features = ["v4_12"] }
