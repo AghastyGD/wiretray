@@ -48,6 +48,7 @@ impl Tray for WireTray {
         vec![
             StandardItem {
                 label: "Start Hotspot".into(),
+                enabled: !self.active,
                 activate: Box::new(move |_tray: &mut Self| {
                     let tx = Arc::clone(&tx_start);
                     tokio::spawn(async move {
@@ -64,6 +65,7 @@ impl Tray for WireTray {
             .into(),
             StandardItem {
                 label: "Stop Hotspot".into(),
+                enabled: self.active,
                 activate: Box::new(move |_tray: &mut Self| {
                     let tx = Arc::clone(&tx_stop);
                     tokio::spawn(async move {
