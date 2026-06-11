@@ -54,16 +54,31 @@ impl HotspotService {
 
     pub async fn candidate_devices(&self) -> Result<Vec<Device>> {
         match &self.backend {
-            HotspotBackendHandle::NetworkManager(network) => network.wifi_devices().await,
+            HotspotBackendHandle::NetworkManager(network) => Ok(network
+                .wifi_devices()
+                .await?
+                .into_iter()
+                .filter(Device::supports_hotspot)
+                .collect()),
         }
     }
 
     #[allow(dead_code)]
     pub async fn capability(&self) -> Result<HotspotCapability> {
+        let wifi_devices = self.candidate_devices().await?;
+
+        for device in &wifi_devices {
+            tracing::info!(
+                "{} supports AP: {}",
+                device.interface,
+                device.capabilities.access_point
+            );
+        }
+
         Ok(HotspotCapability {
             backend: self.backend(),
             radio_state: self.radio_state().await?,
-            wifi_devices: self.candidate_devices().await?,
+            wifi_devices,
         })
     }
 
