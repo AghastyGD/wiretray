@@ -2,12 +2,13 @@ use gtk::Align;
 use gtk::prelude::*;
 use gtk::{
     Application, ApplicationWindow, Box as GtkBox, Button, Entry, Grid, Label, Orientation,
-    PasswordEntry, Separator,
+    PasswordEntry, Separator, Stack, StackSwitcher,
 };
 
 use tokio::runtime::Handle;
 
 use crate::application::hotspot as hotspot_app;
+use crate::services::hotspot_service::HotspotService;
 use crate::settings::{hotspot_settings::HotspotSettings, service::SettingsService};
 
 const WINDOW_NAME: &str = "wiretray-settings";
@@ -25,6 +26,13 @@ pub fn present(app: &Application, tokio_handle: Handle) {
         .expect("failed to load settings");
 
     let active = tokio_handle.block_on(hotspot_app::is_active());
+
+    let hotspot = tokio_handle.block_on(HotspotService::new()).ok();
+
+    let device = hotspot
+        .as_ref()
+        .and_then(|svc| tokio_handle.block_on(svc.candidate_devices()).ok())
+        .and_then(|devices| devices.into_iter().next());
 
     let status_label = Label::builder()
         .label(if active { "● Active" } else { "○ Inactive" })
@@ -256,17 +264,83 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
     let separator = Separator::new(Orientation::Horizontal);
 
-    let content = GtkBox::builder()
+    let hotspot_page = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(12)
         .build();
 
-    content.append(&status_label);
-    content.append(&grid);
-    content.append(&separator);
-    content.append(&hint);
-    content.append(&error_label);
-    content.append(&action_bar);
+    hotspot_page.append(&status_label);
+    hotspot_page.append(&grid);
+    hotspot_page.append(&separator);
+    hotspot_page.append(&hint);
+    hotspot_page.append(&error_label);
+    hotspot_page.append(&action_bar);
+
+    let device_page = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(12)
+        .margin_top(24)
+        .margin_bottom(24)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+
+    let device_grid = Grid::builder().row_spacing(12).column_spacing(16).build();
+
+    let interface_label = Label::builder()
+        .label("Interface")
+        .halign(Align::Start)
+        .build();
+
+    let interface_value = Label::builder()
+        .label(
+            device
+                .as_ref()
+                .map(|d| d.interface.as_str())
+                .unwrap_or("Unknown"),
+        )
+        .halign(Align::Start)
+        .build();
+
+    let hotspot_label = Label::builder()
+        .label("Hotspot Support")
+        .halign(Align::Start)
+        .build();
+
+    let hotspot_value = Label::builder()
+        .label(if device.as_ref().is_some_and(|d| d.supports_hotspot()) {
+            "Supported"
+        } else {
+            "Not Supported"
+        })
+        .halign(Align::Start)
+        .build();
+
+    device_grid.attach(&interface_label, 0, 0, 1, 1);
+    device_grid.attach(&interface_value, 1, 0, 1, 1);
+
+    device_grid.attach(&hotspot_label, 0, 1, 1, 1);
+    device_grid.attach(&hotspot_value, 1, 1, 1, 1);
+
+    device_page.append(&device_grid);
+
+    let stack = Stack::builder().hexpand(true).vexpand(true).build();
+
+    stack.add_titled(&hotspot_page, Some("Hotspot"), "Hostpost");
+
+    stack.add_titled(&device_page, Some("device-info"), "Device Information");
+
+    let switcher = StackSwitcher::builder()
+        .stack(&stack)
+        .margin_top(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+
+    let content = GtkBox::builder().orientation(Orientation::Vertical).build();
+
+    content.append(&switcher);
+    content.append(&stack);
 
     let window = ApplicationWindow::builder()
         .application(app)

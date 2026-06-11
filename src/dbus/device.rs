@@ -1,6 +1,10 @@
 use zbus::{Connection, Proxy};
 
-use crate::models::{device::{Device, DeviceCapabilities}, device_state::DeviceState, device_type::DeviceType};
+use crate::models::{
+    device::{Device, DeviceCapabilities},
+    device_state::DeviceState,
+    device_type::DeviceType,
+};
 
 const NM_WIFI_DEVICE_CAP_AP: u32 = 0x00000040;
 
@@ -30,9 +34,7 @@ pub async fn load_device(connection: &Connection, path: &str) -> zbus::Result<De
         )
         .await?;
 
-        let capabilites: u32 = wifi_proxy
-            .get_property("WirelessCapabilities")
-            .await?;
+        let capabilites: u32 = wifi_proxy.get_property("WirelessCapabilities").await?;
 
         access_point = (capabilites & NM_WIFI_DEVICE_CAP_AP) != 0;
     }
@@ -42,8 +44,6 @@ pub async fn load_device(connection: &Connection, path: &str) -> zbus::Result<De
         interface,
         device_type: DeviceType::from(device_type),
         state: DeviceState::from(state),
-        capabilities: DeviceCapabilities {
-            access_point,
-        }
+        capabilities: DeviceCapabilities { access_point },
     })
 }

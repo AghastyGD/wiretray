@@ -12,7 +12,6 @@ pub struct Device {
     pub capabilities: DeviceCapabilities,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceCapabilities {
     pub access_point: bool,
