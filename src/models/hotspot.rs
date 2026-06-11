@@ -71,6 +71,7 @@ pub struct ActiveHotspot {
 impl HotspotCapability {
     #[allow(dead_code)]
     pub fn is_supported(&self) -> bool {
-        self.radio_state.hardware_enabled && !self.wifi_devices.is_empty()
+        self.radio_state.hardware_enabled &&
+        self.wifi_devices.iter().any(Device::supports_hotspot)
     }
 }

@@ -58,12 +58,22 @@ impl HotspotService {
         }
     }
 
-    #[allow(dead_code)]
+#[allow(dead_code)]
     pub async fn capability(&self) -> Result<HotspotCapability> {
+        let wifi_devices = self.candidate_devices().await?;
+
+        for device in &wifi_devices {
+            tracing::info!(
+                "{} supports AP: {}",
+                device.interface,
+                device.capabilities.access_point
+            );
+        }
+
         Ok(HotspotCapability {
             backend: self.backend(),
             radio_state: self.radio_state().await?,
-            wifi_devices: self.candidate_devices().await?,
+            wifi_devices,
         })
     }
 
