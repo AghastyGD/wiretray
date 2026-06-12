@@ -44,6 +44,8 @@ Implemented so far:
 
 - [x] Hotspot settings persistence
 
+- [x] Wi-Fi capability detection
+
     
 
 Currently in progress:
@@ -157,8 +159,6 @@ Planned work includes:
 - Connected client monitoring
     
 - Hotspot notifications
-    
-- Wi-Fi capability detection
     
 - Advanced hotspot configuration
     
