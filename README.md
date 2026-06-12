@@ -50,8 +50,6 @@ Implemented so far:
 
 Currently in progress:
     
-- Improved hotspot state handling
-    
 - Better error reporting
     
 
@@ -113,7 +111,7 @@ Or build a specific binary:
 
 ```bash
 cargo build --bin wiretray
-cargo build --bin wiretray_settings
+cargo build --bin wiretray-settings
 ```
 
 ## Running
@@ -127,7 +125,7 @@ cargo run --bin wiretray
 Launch the settings application directly:
 
 ```bash
-cargo run --bin wiretray_settings
+cargo run --bin wiretray-settings
 ```
 
 ## Development
