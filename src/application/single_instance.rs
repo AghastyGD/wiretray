@@ -16,6 +16,7 @@ pub fn acquire_lock() -> Result<File> {
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(&lock_path)
         .with_context(|| format!("Failed to open lock file at {}", lock_path.display()))?;
 
