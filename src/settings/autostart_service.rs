@@ -76,11 +76,12 @@ fn desktop_entry() -> &'static str {
 Type=Application
 Name=Wiretray
 Comment=Wi-Fi hotspot manager for Linux
-Exec=wiretray
+Exec=/usr/bin/wiretray
 Icon=io.github.AghastyGD.Wiretray
 Terminal=false
-Categories=Network;GTK;
 StartupNotify=false
+Hidden=false
 X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
 "#
 }
