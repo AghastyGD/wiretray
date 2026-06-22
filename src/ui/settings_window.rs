@@ -1,15 +1,18 @@
 use gtk::Align;
 use gtk::prelude::*;
 use gtk::{
-    Application, ApplicationWindow, Box as GtkBox, Button, Entry, Grid, Label, Orientation,
-    PasswordEntry, Separator, Stack, StackSwitcher,
+    Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry, Grid, Label,
+    Orientation, PasswordEntry, Separator, Stack, StackSwitcher,
 };
 
 use tokio::runtime::Handle;
 
 use crate::application::hotspot as hotspot_app;
 use crate::services::hotspot_service::HotspotService;
-use crate::settings::{hotspot_settings::HotspotSettings, service::SettingsService};
+use crate::settings::{
+    autostart_service::AutostartService, hotspot_settings::HotspotSettings,
+    service::SettingsService,
+};
 
 const WINDOW_NAME: &str = "wiretray-settings";
 
@@ -143,6 +146,27 @@ pub fn present(app: &Application, tokio_handle: Handle) {
         .sensitive(active)
         .build();
 
+    let autostart_check = CheckButton::builder()
+        .label("Start automatically on login")
+        .active(AutostartService::is_enabled())
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+
+    autostart_check.connect_toggled(|check| {
+        let result = if check.is_active() {
+            AutostartService::enable()
+        } else {
+            AutostartService::disable()
+        };
+
+        if let Err(err) = result {
+            tracing::error!("Failed to update autostart setting: {err:#}");
+
+            check.set_active(!check.is_active());
+        }
+    });
+
     let save_btn = Button::builder()
         .label("Save")
         .css_classes(["suggested-action"])
@@ -271,6 +295,7 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
     hotspot_page.append(&status_label);
     hotspot_page.append(&grid);
+    hotspot_page.append(&autostart_check);
     hotspot_page.append(&separator);
     hotspot_page.append(&hint);
     hotspot_page.append(&error_label);

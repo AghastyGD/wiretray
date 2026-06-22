@@ -1,7 +1,10 @@
 [package]
 name = "wiretray"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "A Linux Wi-Fi hotspot manager with a system tray interface"
+license = "MIT"
+readme = "README.md"
 
 [[bin]]
 name = "wiretray-settings"
@@ -23,3 +26,39 @@ uuid = { version = "1", features = ["v4"] }
 
 image = "0.25"
 gtk = { version = "0.11.3", package = "gtk4", features = ["v4_12"] }
+fs2 = "0.4"
+
+[package.metadata.deb]
+maintainer = "Augusto Domingos <augustodomingosvasco@gmail.com>"
+copyright = "2026, Augusto Domingos <augustodomingosvasco@gmail.com>"
+name = "wiretray"
+section = "net"
+priority = "optional"
+depends = "$auto, network-manager, libglib2.0-bin"
+maintainer-scripts = "packaging/debian"
+extended-description = """
+Wiretray is a Linux Wi-Fi hotspot manager focused on quick and convenient hotspot control.
+
+It allows hotspots to be managed directly from the system tray, making hotspot management feel like any other background service on Linux.
+"""
+
+assets = [
+    ["target/release/wiretray", "usr/bin/", "755"],
+    ["target/release/wiretray-settings", "usr/bin/", "755"],
+
+    ["data/applications/io.github.AghastyGD.Wiretray.desktop",
+     "usr/share/applications/",
+     "644"],
+
+    ["assets/icons/app/io.github.AghastyGD.Wiretray.png",
+     "usr/share/icons/hicolor/256x256/apps/io.github.AghastyGD.Wiretray.png",
+     "644"],
+
+    ["data/io.github.AghastyGD.Wiretray.gschema.xml",
+     "usr/share/glib-2.0/schemas/",
+     "644"],
+
+    ["README.md",
+     "usr/share/doc/wiretray/README.md",
+     "644"],
+]

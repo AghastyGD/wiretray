@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Wiretray
+Comment=Wi-Fi hotspot manager for Linux
+Exec=wiretray-settings
+Icon=io.github.AghastyGD.Wiretray
+Terminal=false
+Categories=Network;GTK;
+StartupNotify=true
