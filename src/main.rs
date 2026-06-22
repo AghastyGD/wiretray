@@ -1,10 +1,18 @@
 use anyhow::Result;
 
-use wiretray::tray;
+use wiretray::{application::single_instance, tray};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logging();
+
+    let _instance_lock = match single_instance::acquire_lock() {
+        Ok(lock) => lock,
+        Err(err) => {
+            tracing::info!("Wiretray is already running: {err:#}");
+            return Ok(());
+        }
+    };
 
     tracing::info!("Starting Wiretray...");
 
