@@ -1,7 +1,7 @@
 # Maintainer: Augusto Domingos [augustodomingosvasco@gmail.com](mailto:augustodomingosvasco@gmail.com)
 
 pkgname=wiretray
-pkgver=0.2.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc="A Linux Wi-Fi hotspot manager with a system tray interface"
 arch=('x86_64')
@@ -12,6 +12,8 @@ depends=(
 'gtk4'
 'glib2'
 'networkmanager'
+'dnsmasq'
+'iptables'
 'hicolor-icon-theme'
 )
 
