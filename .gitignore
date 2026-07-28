@@ -1,2 +1,4 @@
 /target
 /data/gschemas.compiled
+/packaging/arch/pkg
+/packaging/arch/src
