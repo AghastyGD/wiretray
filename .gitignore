@@ -2,3 +2,4 @@
 /data/gschemas.compiled
 /packaging/arch/pkg
 /packaging/arch/src
+packaging/arch/wiretray-*
