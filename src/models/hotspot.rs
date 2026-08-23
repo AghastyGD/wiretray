@@ -4,6 +4,7 @@ use super::device::Device;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotspotBackend {
     NetworkManager,
+    ConcurrentAp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
