@@ -10,6 +10,8 @@ use super::{
     runtime_state::{RuntimePaths, RuntimeState},
 };
 
+const INSTALLED_HELPER_PATH: &str = "/usr/lib/wiretray/wiretray-helper";
+
 pub async fn start(hotspot: &HotspotConfig, paths: &RuntimePaths) -> Result<RuntimeState> {
     let response = invoke(HelperRequest::Start {
         runtime_directory: paths.directory.clone(),
@@ -86,15 +88,12 @@ fn resolve_helper_binary() -> Result<PathBuf> {
         }
     }
 
-    let helper = env::var_os("PATH")
-        .and_then(|path| {
-            env::split_paths(&path)
-                .map(|directory| directory.join("wiretray-helper"))
-                .find(|candidate| candidate.is_file())
-        })
-        .context(
-            "wiretray-helper was not found; install it or build all binaries with `cargo build --bins`",
-        )?;
+    let helper = PathBuf::from(INSTALLED_HELPER_PATH);
+    if !helper.is_file() {
+        bail!(
+            "wiretray-helper was not found; install it or build all binaries with `cargo build --bins`"
+        );
+    }
 
     helper
         .canonicalize()

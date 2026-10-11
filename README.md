@@ -63,14 +63,17 @@ Currently in progress:
 
 ## Experimental Concurrent AP Backend
 
-The NetworkManager backend remains the default. To opt in to the experimental
-AP + Client backend internally, run:
+The NetworkManager backend remains the default. To use the experimental AP +
+Client backend, open Wiretray Settings and choose **Keep internet connection**
+under **Hotspot mode**.
+
+The same setting can be changed from a terminal with:
 
 ```
 gsettings set io.github.AghastyGD.Wiretray hotspot-backend 'concurrent-ap'
 ```
 
-To return to the default backend:
+To return to **Standard hotspot** from a terminal:
 
 ```
 gsettings set io.github.AghastyGD.Wiretray hotspot-backend 'network-manager'
@@ -78,9 +81,11 @@ gsettings set io.github.AghastyGD.Wiretray hotspot-backend 'network-manager'
 
 The concurrent backend requires `iw`, `ip`, `hostapd`, `dnsmasq`, `iptables`,
 `sysctl`, and `pkexec`. The Wi-Fi adapter must support concurrent managed and AP
-interfaces. A dedicated `wiretray-helper` batches privileged operations, so
-PolicyKit normally requests authorization once when starting and once when
-stopping. Privileged runtime files are kept under `/run/wiretray/<uid>/`.
+interfaces. A dedicated `wiretray-helper` batches privileged operations. When
+Wiretray is installed from a package, its PolicyKit rule lets a local user in
+the `wheel` or `sudo` group start and stop this backend without repeated
+authentication prompts. Privileged runtime files are kept under
+`/run/wiretray/<uid>/`.
 
 ## Installation
 

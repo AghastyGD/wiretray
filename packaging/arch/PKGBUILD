@@ -12,8 +12,13 @@ depends=(
 'gtk4'
 'glib2'
 'networkmanager'
+'hostapd'
 'dnsmasq'
 'iptables'
+'iproute2'
+'iw'
+'polkit'
+'procps-ng'
 'hicolor-icon-theme'
 )
 
@@ -61,12 +66,16 @@ package() {
 
   install -Dm755 "target/release/wiretray" "${pkgdir}/usr/bin/wiretray"
   install -Dm755 "target/release/wiretray-settings" "${pkgdir}/usr/bin/wiretray-settings"
+  install -Dm755 "target/release/wiretray-helper" "${pkgdir}/usr/lib/wiretray/wiretray-helper"
 
   install -Dm644 "data/applications/io.github.AghastyGD.Wiretray.desktop" "${pkgdir}/usr/share/applications/io.github.AghastyGD.Wiretray.desktop"
 
   install -Dm644 "assets/icons/app/io.github.AghastyGD.Wiretray.png" "${pkgdir}/usr/share/icons/hicolor/256x256/apps/io.github.AghastyGD.Wiretray.png"
 
   install -Dm644 "data/io.github.AghastyGD.Wiretray.gschema.xml" "${pkgdir}/usr/share/glib-2.0/schemas/io.github.AghastyGD.Wiretray.gschema.xml"
+
+  install -Dm644 "data/polkit/io.github.AghastyGD.Wiretray.policy" "${pkgdir}/usr/share/polkit-1/actions/io.github.AghastyGD.Wiretray.policy"
+  install -Dm644 "data/polkit/io.github.AghastyGD.Wiretray.rules" "${pkgdir}/usr/share/polkit-1/rules.d/io.github.AghastyGD.Wiretray.rules"
 
   install -Dm644 "LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
   install -Dm644 "README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"

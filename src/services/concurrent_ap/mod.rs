@@ -22,6 +22,17 @@ const REQUIRED_COMMANDS: [&str; 7] = [
 pub const DEFAULT_AP_INTERFACE: &str = "wiretray-ap0";
 pub const DEFAULT_AP_ADDRESS: &str = "192.168.50.1/24";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ApRadioConfig {
+    hw_mode: char,
+    channel: u16,
+}
+
+const DEFAULT_RADIO_CONFIG: ApRadioConfig = ApRadioConfig {
+    hw_mode: 'g',
+    channel: 1,
+};
+
 /// Skeleton for the concurrent AP + client backend.
 ///
 /// This backend is intentionally not connected to `HotspotService` yet. The
@@ -154,7 +165,15 @@ where
 
     /// Writes hostapd and dnsmasq configuration without starting either daemon.
     pub fn write_service_configs(&self, hotspot: &HotspotConfig) -> Result<()> {
-        let hostapd_config = build_hostapd_config(hotspot)?;
+        self.write_service_configs_for_radio(hotspot, DEFAULT_RADIO_CONFIG)
+    }
+
+    fn write_service_configs_for_radio(
+        &self,
+        hotspot: &HotspotConfig,
+        radio: ApRadioConfig,
+    ) -> Result<()> {
+        let hostapd_config = build_hostapd_config(hotspot, radio)?;
         let dnsmasq_config = build_dnsmasq_config(&self.runtime_paths)?;
 
         self.runtime_paths
@@ -179,6 +198,46 @@ where
         }
 
         Ok(())
+    }
+
+    /// Verifies that the selected PHY can keep a managed connection while an
+    /// AP exists, and follows the client's channel when the radio is already
+    /// associated. Most adapters allow only one channel across both virtual
+    /// interfaces.
+    async fn detect_radio_config(&self, parent_interface: &str) -> Result<ApRadioConfig> {
+        let device = self
+            .command_runner
+            .run("iw", &["dev", parent_interface, "info"])
+            .await
+            .with_context(|| format!("Failed to inspect Wi-Fi interface {parent_interface}"))?;
+        let phy = parse_phy_name(&device.stdout).with_context(|| {
+            format!("Could not identify the wireless PHY for {parent_interface}")
+        })?;
+
+        let phy_info = self
+            .command_runner
+            .run("iw", &["phy", &phy, "info"])
+            .await
+            .with_context(|| {
+                format!("Failed to inspect Wi-Fi capabilities for {parent_interface}")
+            })?;
+
+        if !supports_concurrent_managed_ap(&phy_info.stdout) {
+            bail!(
+                "Concurrent hotspot mode is not supported by this Wi-Fi adapter: no managed + AP interface combination was reported"
+            );
+        }
+
+        let link = self
+            .command_runner
+            .run("iw", &["dev", parent_interface, "link"])
+            .await
+            .with_context(|| format!("Failed to inspect the Wi-Fi link for {parent_interface}"))?;
+
+        parse_link_frequency(&link.stdout)
+            .map(radio_config_for_frequency)
+            .transpose()
+            .map(|radio| radio.unwrap_or(DEFAULT_RADIO_CONFIG))
     }
 
     /// Starts only the hostapd and dnsmasq instances configured by Wiretray.
@@ -207,6 +266,7 @@ where
         }
 
         let upstream_interface = self.detect_upstream_interface().await?;
+        let radio = self.detect_radio_config(&hotspot.interface).await?;
         let mut state = RuntimeState {
             ap_interface: DEFAULT_AP_INTERFACE.into(),
             ap_interface_created: false,
@@ -226,7 +286,7 @@ where
             self.create_ap_interface(&hotspot.interface).await?;
             state.ap_interface_created = true;
             state.save(&self.runtime_paths)?;
-            self.write_service_configs(hotspot)?;
+            self.write_service_configs_for_radio(hotspot, radio)?;
 
             let pids = self.start_services().await?;
             state.hostapd_pid = Some(pids.hostapd);
@@ -312,7 +372,7 @@ where
     }
 }
 
-fn build_hostapd_config(hotspot: &HotspotConfig) -> Result<String> {
+fn build_hostapd_config(hotspot: &HotspotConfig, radio: ApRadioConfig) -> Result<String> {
     if hotspot.ssid.is_empty() || hotspot.ssid.len() > 32 {
         bail!("Hotspot SSID must be between 1 and 32 bytes");
     }
@@ -321,10 +381,12 @@ fn build_hostapd_config(hotspot: &HotspotConfig) -> Result<String> {
         "interface={DEFAULT_AP_INTERFACE}\n\
          driver=nl80211\n\
          ssid2={}\n\
-         hw_mode=g\n\
-         channel=1\n\
+         hw_mode={}\n\
+         channel={}\n\
          auth_algs=1\n",
-        encode_hex(hotspot.ssid.as_bytes())
+        encode_hex(hotspot.ssid.as_bytes()),
+        radio.hw_mode,
+        radio.channel,
     );
 
     if let Some(passphrase) = &hotspot.passphrase {
@@ -367,7 +429,7 @@ fn build_dnsmasq_config(paths: &RuntimePaths) -> Result<String> {
          listen-address=192.168.50.1\n\
          dhcp-range=192.168.50.10,192.168.50.100,12h\n\
          dhcp-option=3,192.168.50.1\n\
-         dhcp-option=6,8.8.8.8,1.1.1.1\n\
+         dhcp-option=6,192.168.50.1\n\
          dhcp-leasefile={leases_path}\n\
          pid-file={pid_path}\n"
     ))
@@ -428,6 +490,84 @@ fn parse_default_route_interface(output: &str) -> Result<String> {
         .ok_or_else(|| {
             anyhow::anyhow!("No active default route with an upstream interface was found")
         })
+}
+
+fn parse_phy_name(output: &str) -> Result<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("wiphy "))
+        .filter(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(|index| format!("phy{index}"))
+        .ok_or_else(|| anyhow::anyhow!("iw did not report a valid wiphy index"))
+}
+
+fn supports_concurrent_managed_ap(output: &str) -> bool {
+    let Some((_, combinations)) = output.split_once("valid interface combinations:") else {
+        return false;
+    };
+
+    let mut current = String::new();
+    for line in combinations.lines() {
+        let line = line.trim();
+        if line.starts_with("* ") {
+            if combination_has_managed_and_ap(&current) {
+                return true;
+            }
+            current.clear();
+            current.push_str(line);
+        } else if !current.is_empty()
+            && (line.contains("#{") || line.contains("total") || line.contains("#channels"))
+        {
+            current.push(' ');
+            current.push_str(line);
+        } else if !current.is_empty() && !line.is_empty() {
+            break;
+        }
+    }
+
+    combination_has_managed_and_ap(&current)
+}
+
+fn combination_has_managed_and_ap(combination: &str) -> bool {
+    let mut managed = false;
+    let mut ap = false;
+
+    for group in combination.split("#{").skip(1) {
+        let Some((modes, _)) = group.split_once('}') else {
+            continue;
+        };
+        for mode in modes.split(',').map(str::trim) {
+            managed |= mode == "managed";
+            ap |= mode == "AP";
+        }
+    }
+
+    managed && ap
+}
+
+fn parse_link_frequency(output: &str) -> Option<u32> {
+    output
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("freq:"))
+        .and_then(|frequency| frequency.trim().parse().ok())
+}
+
+fn radio_config_for_frequency(frequency: u32) -> Result<ApRadioConfig> {
+    let (hw_mode, channel) = match frequency {
+        2484 => ('g', 14),
+        2412..=2472 if (frequency - 2407).is_multiple_of(5) => ('g', (frequency - 2407) / 5),
+        5005..=5895 if (frequency - 5000).is_multiple_of(5) => ('a', (frequency - 5000) / 5),
+        _ => bail!(
+            "Concurrent hotspot mode does not support the current Wi-Fi frequency {frequency} MHz"
+        ),
+    };
+
+    Ok(ApRadioConfig {
+        hw_mode,
+        channel: channel as u16,
+    })
 }
 
 #[cfg(test)]
@@ -565,6 +705,21 @@ mod tests {
             match (command, args) {
                 ("ip", ["route", "show", "default"]) => {
                     stdout = "default via 10.0.0.1 dev enp2s0 metric 100\n".into();
+                }
+                ("iw", ["dev", "wlp3s0", "info"]) => {
+                    stdout = "Interface wlp3s0\n\twiphy 0\n".into();
+                }
+                ("iw", ["phy", "phy0", "info"]) => {
+                    stdout = concat!(
+                        "Wiphy phy0\n",
+                        "\tvalid interface combinations:\n",
+                        "\t\t * #{ managed } <= 1, #{ AP } <= 1,\n",
+                        "\t\t   total <= 2, #channels <= 1\n",
+                    )
+                    .into();
+                }
+                ("iw", ["dev", "wlp3s0", "link"]) => {
+                    stdout = "Connected to 00:11:22:33:44:55\n\tfreq: 2437\n".into();
                 }
                 ("ip", ["link", "show", "dev", DEFAULT_AP_INTERFACE]) => {
                     status = i32::from(!self.interface_exists.load(Ordering::SeqCst));
@@ -748,7 +903,7 @@ mod tests {
             passphrase: Some("12345678".into()),
         };
 
-        let config = build_hostapd_config(&hotspot).unwrap();
+        let config = build_hostapd_config(&hotspot, DEFAULT_RADIO_CONFIG).unwrap();
 
         assert!(config.contains("interface=wiretray-ap0\n"));
         assert!(config.contains("ssid2=57697265747261792d54657374\n"));
@@ -765,10 +920,31 @@ mod tests {
             passphrase: Some(psk.clone()),
         };
 
-        let config = build_hostapd_config(&hotspot).unwrap();
+        let config = build_hostapd_config(&hotspot, DEFAULT_RADIO_CONFIG).unwrap();
 
         assert!(config.contains(&format!("wpa_psk={psk}\n")));
         assert!(!config.contains("wpa_passphrase="));
+    }
+
+    #[test]
+    fn writes_the_clients_5_ghz_channel_to_hostapd() {
+        let hotspot = HotspotConfig {
+            interface: "wlp3s0".into(),
+            ssid: "Wiretray".into(),
+            passphrase: Some("12345678".into()),
+        };
+
+        let config = build_hostapd_config(
+            &hotspot,
+            ApRadioConfig {
+                hw_mode: 'a',
+                channel: 36,
+            },
+        )
+        .unwrap();
+
+        assert!(config.contains("hw_mode=a\n"));
+        assert!(config.contains("channel=36\n"));
     }
 
     #[test]
@@ -779,7 +955,7 @@ mod tests {
             passphrase: None,
         };
 
-        let config = build_hostapd_config(&hotspot).unwrap();
+        let config = build_hostapd_config(&hotspot, DEFAULT_RADIO_CONFIG).unwrap();
 
         assert!(!config.contains("wpa="));
         assert!(!config.contains("wpa_passphrase="));
@@ -794,7 +970,9 @@ mod tests {
             passphrase: Some("password\nwpa=0".into()),
         };
 
-        let error = build_hostapd_config(&hotspot).unwrap_err().to_string();
+        let error = build_hostapd_config(&hotspot, DEFAULT_RADIO_CONFIG)
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("printable ASCII"));
     }
@@ -808,6 +986,7 @@ mod tests {
         assert!(config.contains("interface=wiretray-ap0\n"));
         assert!(config.contains("listen-address=192.168.50.1\n"));
         assert!(config.contains("dhcp-range=192.168.50.10,192.168.50.100,12h\n"));
+        assert!(config.contains("dhcp-option=6,192.168.50.1\n"));
         assert!(config.contains("dhcp-leasefile=/run/user/1000/wiretray/dnsmasq.leases\n"));
     }
 
@@ -909,6 +1088,64 @@ mod tests {
         let output = "default via 10.0.0.1 dev enp2s0 proto dhcp metric 100\n";
 
         assert_eq!(parse_default_route_interface(output).unwrap(), "enp2s0");
+    }
+
+    #[test]
+    fn parses_the_selected_interface_phy() {
+        let output = "Interface wlp3s0\n\tifindex 3\n\twdev 0x1\n\twiphy 2\n";
+
+        assert_eq!(parse_phy_name(output).unwrap(), "phy2");
+    }
+
+    #[test]
+    fn accepts_a_managed_and_ap_interface_combination() {
+        let output = concat!(
+            "Wiphy phy0\n",
+            "\tvalid interface combinations:\n",
+            "\t\t * #{ managed } <= 1, #{ AP, P2P-client } <= 1,\n",
+            "\t\t   total <= 2, #channels <= 1\n",
+        );
+
+        assert!(supports_concurrent_managed_ap(output));
+    }
+
+    #[test]
+    fn rejects_ap_support_without_a_concurrent_combination() {
+        let output = concat!(
+            "Wiphy phy0\n",
+            "\tSupported interface modes:\n",
+            "\t\t * managed\n",
+            "\t\t * AP\n",
+            "\tvalid interface combinations:\n",
+            "\t\t * #{ managed } <= 1, total <= 1, #channels <= 1\n",
+            "\t\t * #{ AP } <= 1, total <= 1, #channels <= 1\n",
+        );
+
+        assert!(!supports_concurrent_managed_ap(output));
+    }
+
+    #[test]
+    fn follows_the_clients_24_ghz_channel() {
+        let frequency = parse_link_frequency("Connected\n\tfreq: 2437\n").unwrap();
+
+        assert_eq!(
+            radio_config_for_frequency(frequency).unwrap(),
+            ApRadioConfig {
+                hw_mode: 'g',
+                channel: 6,
+            }
+        );
+    }
+
+    #[test]
+    fn follows_the_clients_5_ghz_channel() {
+        assert_eq!(
+            radio_config_for_frequency(5180).unwrap(),
+            ApRadioConfig {
+                hw_mode: 'a',
+                channel: 36,
+            }
+        );
     }
 
     #[test]
