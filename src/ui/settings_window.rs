@@ -2,7 +2,7 @@ use gtk::Align;
 use gtk::prelude::*;
 use gtk::{
     Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, DropDown, Entry, Grid,
-    Label, Orientation, PasswordEntry, Separator, Stack, StackSwitcher,
+    Label, Orientation, PasswordEntry, PolicyType, ScrolledWindow, Separator, Stack, StackSwitcher,
 };
 
 use tokio::runtime::Handle;
@@ -186,6 +186,9 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
     let error_label = Label::builder()
         .halign(Align::Start)
+        .xalign(0.0)
+        .wrap(true)
+        .selectable(true)
         .margin_start(24)
         .margin_end(24)
         .visible(false)
@@ -373,6 +376,12 @@ pub fn present(app: &Application, tokio_handle: Handle) {
     hotspot_page.append(&error_label);
     hotspot_page.append(&action_bar);
 
+    let hotspot_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .child(&hotspot_page)
+        .build();
+
     let device_page = GtkBox::builder()
         .orientation(Orientation::Vertical)
         .spacing(12)
@@ -423,7 +432,7 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
     let stack = Stack::builder().hexpand(true).vexpand(true).build();
 
-    stack.add_titled(&hotspot_page, Some("Hotspot"), "Hostpost");
+    stack.add_titled(&hotspot_scroll, Some("Hotspot"), "Hotspot");
 
     stack.add_titled(&device_page, Some("device-info"), "Device Information");
 
