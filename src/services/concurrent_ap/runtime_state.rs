@@ -19,6 +19,7 @@ pub struct RuntimePaths {
     pub dnsmasq_pid: PathBuf,
     pub dnsmasq_leases: PathBuf,
     pub state: PathBuf,
+    pub state_temporary: PathBuf,
 }
 
 impl RuntimePaths {
@@ -42,6 +43,7 @@ impl RuntimePaths {
             dnsmasq_pid: directory.join("dnsmasq.pid"),
             dnsmasq_leases: directory.join("dnsmasq.leases"),
             state: directory.join("state.json"),
+            state_temporary: directory.join("state.json.tmp"),
             directory,
         }
     }
@@ -114,7 +116,15 @@ pub struct RuntimeState {
     pub ap_ip: String,
     pub hostapd_pid: Option<u32>,
     pub dnsmasq_pid: Option<u32>,
+    #[serde(default = "default_ip_forwarding_was_enabled")]
+    pub ip_forwarding_was_enabled: bool,
     pub iptables_rules: Vec<IptablesRule>,
+}
+
+fn default_ip_forwarding_was_enabled() -> bool {
+    // Older state files did not record ownership of this global setting. The
+    // safe fallback is to leave forwarding enabled during cleanup.
+    true
 }
 
 impl RuntimeState {
@@ -136,19 +146,18 @@ impl RuntimeState {
     pub fn save(&self, paths: &RuntimePaths) -> Result<()> {
         paths.ensure_directory()?;
 
-        let temporary_path = paths.state.with_extension("json.tmp");
         let contents =
             serde_json::to_vec_pretty(self).context("Failed to serialize runtime state")?;
 
         paths
-            .write_secure_file(&temporary_path, &contents)
+            .write_secure_file(&paths.state_temporary, &contents)
             .with_context(|| {
                 format!(
                     "Failed to write temporary runtime state {}",
-                    temporary_path.display()
+                    paths.state_temporary.display()
                 )
             })?;
-        fs::rename(&temporary_path, &paths.state).with_context(|| {
+        fs::rename(&paths.state_temporary, &paths.state).with_context(|| {
             format!("Failed to publish runtime state {}", paths.state.display())
         })?;
 
@@ -190,6 +199,7 @@ mod tests {
             ap_ip: "192.168.50.1/24".into(),
             hostapd_pid: Some(1234),
             dnsmasq_pid: Some(1235),
+            ip_forwarding_was_enabled: false,
             iptables_rules: vec![IptablesRule {
                 table: "nat".into(),
                 chain: "POSTROUTING".into(),
@@ -206,5 +216,21 @@ mod tests {
         let decoded: RuntimeState = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, state);
+    }
+
+    #[test]
+    fn legacy_state_does_not_claim_ownership_of_ip_forwarding() {
+        let json = r#"{
+            "ap_interface": "wiretray-ap0",
+            "upstream_interface": "wlp3s0",
+            "ap_ip": "192.168.50.1/24",
+            "hostapd_pid": 1234,
+            "dnsmasq_pid": 1235,
+            "iptables_rules": []
+        }"#;
+
+        let state: RuntimeState = serde_json::from_str(json).unwrap();
+
+        assert!(state.ip_forwarding_was_enabled);
     }
 }

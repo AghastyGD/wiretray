@@ -1,15 +1,20 @@
+pub mod cleanup;
 pub mod command_runner;
+pub mod firewall;
+pub mod process_manager;
 pub mod runtime_state;
 
 use anyhow::{Context, Result, bail};
 
 use self::{
     command_runner::{CommandRunner, SystemCommandRunner},
+    firewall::FirewallState,
+    process_manager::ServicePids,
     runtime_state::RuntimePaths,
 };
 use crate::models::hotspot::HotspotConfig;
 
-const REQUIRED_COMMANDS: [&str; 5] = ["iw", "ip", "hostapd", "dnsmasq", "iptables"];
+const REQUIRED_COMMANDS: [&str; 6] = ["iw", "ip", "hostapd", "dnsmasq", "iptables", "sysctl"];
 pub const DEFAULT_AP_INTERFACE: &str = "wiretray-ap0";
 pub const DEFAULT_AP_ADDRESS: &str = "192.168.50.1/24";
 
@@ -161,6 +166,22 @@ where
         Ok(())
     }
 
+    /// Starts only the hostapd and dnsmasq instances configured by Wiretray.
+    pub async fn start_services(&self) -> Result<ServicePids> {
+        process_manager::start_services(&self.command_runner, &self.runtime_paths).await
+    }
+
+    /// Enables IPv4 forwarding and applies only Wiretray-owned firewall rules.
+    pub async fn enable_network_sharing(&self, upstream_interface: &str) -> Result<FirewallState> {
+        validate_interface_name(upstream_interface, "Upstream interface")?;
+        firewall::enable_network_sharing(&self.command_runner, upstream_interface).await
+    }
+
+    /// Cleans resources recorded in state.json. Returns false when no state exists.
+    pub async fn cleanup(&self) -> Result<bool> {
+        cleanup::cleanup(&self.command_runner, &self.runtime_paths).await
+    }
+
     async fn interface_exists(&self, interface: &str) -> Result<bool> {
         let output = self
             .command_runner
@@ -258,6 +279,7 @@ fn validate_hostapd_passphrase(passphrase: &str) -> Result<()> {
 
 fn build_dnsmasq_config(paths: &RuntimePaths) -> Result<String> {
     let leases_path = config_path_value(&paths.dnsmasq_leases, "dnsmasq lease file")?;
+    let pid_path = config_path_value(&paths.dnsmasq_pid, "dnsmasq PID file")?;
 
     Ok(format!(
         "interface={DEFAULT_AP_INTERFACE}\n\
@@ -266,7 +288,8 @@ fn build_dnsmasq_config(paths: &RuntimePaths) -> Result<String> {
          dhcp-range=192.168.50.10,192.168.50.100,12h\n\
          dhcp-option=3,192.168.50.1\n\
          dhcp-option=6,8.8.8.8,1.1.1.1\n\
-         dhcp-leasefile={leases_path}\n"
+         dhcp-leasefile={leases_path}\n\
+         pid-file={pid_path}\n"
     ))
 }
 
@@ -294,7 +317,7 @@ fn encode_hex(bytes: &[u8]) -> String {
     )
 }
 
-fn validate_interface_name(interface: &str, label: &str) -> Result<()> {
+pub(super) fn validate_interface_name(interface: &str, label: &str) -> Result<()> {
     if interface.is_empty() || interface.len() > 15 {
         bail!("{label} must contain between 1 and 15 bytes");
     }
@@ -438,7 +461,7 @@ mod tests {
     #[test]
     fn dependency_check_lists_every_missing_tool() {
         let runner = FakeCommandRunner {
-            available: HashSet::from(["ip", "iptables"]),
+            available: HashSet::from(["ip", "iptables", "sysctl"]),
         };
         let backend = ConcurrentApBackend::with_runner(runner, RuntimePaths::discover());
 
