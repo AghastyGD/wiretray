@@ -22,11 +22,34 @@ where
 
     let hostapd_config = path_argument(&paths.hostapd_config, "hostapd configuration")?;
     let hostapd_pid_file = path_argument(&paths.hostapd_pid, "hostapd PID file")?;
+    let hostapd_log = path_argument(&paths.hostapd_log, "hostapd log")?;
 
-    runner
-        .run("hostapd", &["-B", "-P", hostapd_pid_file, hostapd_config])
+    if let Err(error) = runner
+        .run(
+            "hostapd",
+            &[
+                "-B",
+                "-P",
+                hostapd_pid_file,
+                "-f",
+                hostapd_log,
+                hostapd_config,
+            ],
+        )
         .await
-        .context("Failed to start hostapd")?;
+    {
+        let details = fs::read_to_string(&paths.hostapd_log)
+            .ok()
+            .map(|log| log.trim().to_string())
+            .filter(|log| !log.is_empty());
+
+        return match details {
+            Some(details) => {
+                Err(error).context(format!("Failed to start hostapd. hostapd log:\n{details}"))
+            }
+            None => Err(error).context("Failed to start hostapd (no diagnostic log was written)"),
+        };
+    }
 
     let hostapd_pid = read_pid(&paths.hostapd_pid).context("Failed to track hostapd PID")?;
     let dnsmasq_config = path_argument(&paths.dnsmasq_config, "dnsmasq configuration")?;
@@ -231,6 +254,7 @@ mod tests {
 
     struct DaemonRunner {
         paths: RuntimePaths,
+        fail_hostapd: bool,
         fail_dnsmasq: bool,
         calls: Mutex<Vec<(String, Vec<String>)>>,
     }
@@ -239,6 +263,7 @@ mod tests {
         fn new(paths: RuntimePaths, fail_dnsmasq: bool) -> Self {
             Self {
                 paths,
+                fail_hostapd: false,
                 fail_dnsmasq,
                 calls: Mutex::new(Vec::new()),
             }
@@ -260,8 +285,14 @@ mod tests {
                 args.iter().map(|argument| argument.to_string()).collect(),
             ));
 
-            let failed = command == "dnsmasq" && self.fail_dnsmasq;
-            if command == "hostapd" {
+            let failed = (command == "hostapd" && self.fail_hostapd)
+                || (command == "dnsmasq" && self.fail_dnsmasq);
+            if command == "hostapd" && self.fail_hostapd {
+                fs::write(
+                    &self.paths.hostapd_log,
+                    "nl80211: Could not configure driver mode\n",
+                )?;
+            } else if command == "hostapd" {
                 fs::write(&self.paths.hostapd_pid, "1101\n")?;
             } else if command == "dnsmasq" && !failed {
                 fs::write(&self.paths.dnsmasq_pid, "1102\n")?;
@@ -295,6 +326,23 @@ mod tests {
             }
         );
         assert_eq!(runner.calls().len(), 2);
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn includes_hostapd_log_when_startup_fails() {
+        let (directory, paths) = test_paths();
+        paths.ensure_directory().unwrap();
+        let mut runner = DaemonRunner::new(paths.clone(), false);
+        runner.fail_hostapd = true;
+
+        let error = start_services(&runner, &paths)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("nl80211: Could not configure driver mode"));
 
         fs::remove_dir_all(directory).unwrap();
     }

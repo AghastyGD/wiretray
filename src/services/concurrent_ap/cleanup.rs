@@ -170,9 +170,10 @@ where
     }
 }
 
-fn runtime_artifacts(paths: &RuntimePaths) -> [&Path; 6] {
+fn runtime_artifacts(paths: &RuntimePaths) -> [&Path; 7] {
     [
         &paths.hostapd_config,
+        &paths.hostapd_log,
         &paths.dnsmasq_config,
         &paths.hostapd_pid,
         &paths.dnsmasq_pid,

@@ -24,7 +24,7 @@ enum HotspotBackendHandle {
     NetworkManager(NetworkService),
     ConcurrentAp {
         network: NetworkService,
-        backend: ConcurrentApBackend,
+        backend: Box<ConcurrentApBackend>,
     },
 }
 
@@ -43,7 +43,7 @@ impl HotspotService {
             HotspotBackend::NetworkManager => HotspotBackendHandle::NetworkManager(network),
             HotspotBackend::ConcurrentAp => HotspotBackendHandle::ConcurrentAp {
                 network,
-                backend: ConcurrentApBackend::new(),
+                backend: Box::new(ConcurrentApBackend::new()),
             },
         };
 
