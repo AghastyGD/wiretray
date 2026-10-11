@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 pub struct RuntimePaths {
     pub directory: PathBuf,
     pub hostapd_config: PathBuf,
-    pub hostapd_log: PathBuf,
     pub dnsmasq_config: PathBuf,
     pub hostapd_pid: PathBuf,
     pub dnsmasq_pid: PathBuf,
@@ -34,7 +33,6 @@ impl RuntimePaths {
 
         Self {
             hostapd_config: directory.join("hostapd.conf"),
-            hostapd_log: directory.join("hostapd.log"),
             dnsmasq_config: directory.join("dnsmasq.conf"),
             hostapd_pid: directory.join("hostapd.pid"),
             dnsmasq_pid: directory.join("dnsmasq.pid"),
@@ -201,10 +199,6 @@ mod tests {
         assert_eq!(
             paths.hostapd_config,
             PathBuf::from("/run/user/1000/wiretray/hostapd.conf")
-        );
-        assert_eq!(
-            paths.hostapd_log,
-            PathBuf::from("/run/user/1000/wiretray/hostapd.log")
         );
         assert_eq!(
             paths.dnsmasq_config,

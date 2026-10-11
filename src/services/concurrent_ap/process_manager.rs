@@ -22,34 +22,14 @@ where
 
     let hostapd_config = path_argument(&paths.hostapd_config, "hostapd configuration")?;
     let hostapd_pid_file = path_argument(&paths.hostapd_pid, "hostapd PID file")?;
-    let hostapd_log = path_argument(&paths.hostapd_log, "hostapd log")?;
 
-    if let Err(error) = runner
+    runner
         .run(
             "hostapd",
-            &[
-                "-B",
-                "-P",
-                hostapd_pid_file,
-                "-f",
-                hostapd_log,
-                hostapd_config,
-            ],
+            &["-B", "-d", "-P", hostapd_pid_file, hostapd_config],
         )
         .await
-    {
-        let details = fs::read_to_string(&paths.hostapd_log)
-            .ok()
-            .map(|log| log.trim().to_string())
-            .filter(|log| !log.is_empty());
-
-        return match details {
-            Some(details) => {
-                Err(error).context(format!("Failed to start hostapd. hostapd log:\n{details}"))
-            }
-            None => Err(error).context("Failed to start hostapd (no diagnostic log was written)"),
-        };
-    }
+        .context("Failed to start hostapd")?;
 
     let hostapd_pid = read_pid(&paths.hostapd_pid).context("Failed to track hostapd PID")?;
     let dnsmasq_config = path_argument(&paths.dnsmasq_config, "dnsmasq configuration")?;
@@ -287,12 +267,7 @@ mod tests {
 
             let failed = (command == "hostapd" && self.fail_hostapd)
                 || (command == "dnsmasq" && self.fail_dnsmasq);
-            if command == "hostapd" && self.fail_hostapd {
-                fs::write(
-                    &self.paths.hostapd_log,
-                    "nl80211: Could not configure driver mode\n",
-                )?;
-            } else if command == "hostapd" {
+            if command == "hostapd" && !self.fail_hostapd {
                 fs::write(&self.paths.hostapd_pid, "1101\n")?;
             } else if command == "dnsmasq" && !failed {
                 fs::write(&self.paths.dnsmasq_pid, "1102\n")?;
@@ -300,8 +275,12 @@ mod tests {
 
             Ok(CommandOutput {
                 status: ExitStatus::from_raw(i32::from(failed) << 8),
-                stdout: String::new(),
-                stderr: if failed {
+                stdout: if command == "hostapd" && failed {
+                    "nl80211: Could not configure driver mode".to_string()
+                } else {
+                    String::new()
+                },
+                stderr: if command == "dnsmasq" && failed {
                     "dnsmasq failed".to_string()
                 } else {
                     String::new()
@@ -331,16 +310,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn includes_hostapd_log_when_startup_fails() {
+    async fn includes_hostapd_output_when_startup_fails() {
         let (directory, paths) = test_paths();
         paths.ensure_directory().unwrap();
         let mut runner = DaemonRunner::new(paths.clone(), false);
         runner.fail_hostapd = true;
 
-        let error = start_services(&runner, &paths)
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = format!("{:#}", start_services(&runner, &paths).await.unwrap_err());
 
         assert!(error.contains("nl80211: Could not configure driver mode"));
 

@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use super::{
     DEFAULT_AP_ADDRESS, DEFAULT_AP_INTERFACE,
@@ -139,8 +139,7 @@ where
         ),
     }
 
-    let mut errors = Vec::new();
-    if let Err(error) = runner
+    let address_result = runner
         .run(
             "ip",
             &[
@@ -151,29 +150,28 @@ where
                 state.ap_interface.as_str(),
             ],
         )
-        .await
-    {
-        errors.push(format!("failed to remove AP address: {error:#}"));
-    }
+        .await;
 
-    if let Err(error) = runner
+    let interface_result = runner
         .run("iw", &["dev", state.ap_interface.as_str(), "del"])
-        .await
-    {
-        errors.push(format!("failed to delete virtual AP interface: {error:#}"));
-    }
+        .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        bail!(errors.join("; "))
+    match (address_result, interface_result) {
+        // Deleting the interface also removes all addresses assigned to it, so
+        // a missing address is harmless once interface deletion succeeds.
+        (_, Ok(_)) => Ok(()),
+        (Ok(_), Err(interface_error)) => {
+            Err(interface_error).context("Failed to delete virtual AP interface")
+        }
+        (Err(address_error), Err(interface_error)) => bail!(
+            "failed to remove AP address: {address_error:#}; failed to delete virtual AP interface: {interface_error:#}"
+        ),
     }
 }
 
-fn runtime_artifacts(paths: &RuntimePaths) -> [&Path; 7] {
+fn runtime_artifacts(paths: &RuntimePaths) -> [&Path; 6] {
     [
         &paths.hostapd_config,
-        &paths.hostapd_log,
         &paths.dnsmasq_config,
         &paths.hostapd_pid,
         &paths.dnsmasq_pid,

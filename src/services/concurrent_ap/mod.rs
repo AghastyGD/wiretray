@@ -16,8 +16,8 @@ use self::{
 };
 use crate::models::hotspot::HotspotConfig;
 
-const REQUIRED_COMMANDS: [&str; 7] = [
-    "iw", "ip", "hostapd", "dnsmasq", "iptables", "sysctl", "pkexec",
+const REQUIRED_COMMANDS: [&str; 8] = [
+    "iw", "ip", "hostapd", "dnsmasq", "iptables", "sysctl", "pkexec", "nmcli",
 ];
 pub const DEFAULT_AP_INTERFACE: &str = "wiretray-ap0";
 pub const DEFAULT_AP_ADDRESS: &str = "192.168.50.1/24";
@@ -234,10 +234,13 @@ where
             .await
             .with_context(|| format!("Failed to inspect the Wi-Fi link for {parent_interface}"))?;
 
-        parse_link_frequency(&link.stdout)
-            .map(radio_config_for_frequency)
-            .transpose()
-            .map(|radio| radio.unwrap_or(DEFAULT_RADIO_CONFIG))
+        match parse_link_frequency(&link.stdout) {
+            Some(frequency) => radio_config_for_frequency(frequency),
+            None if link.stdout.trim() == "Not connected." => Ok(DEFAULT_RADIO_CONFIG),
+            None => bail!(
+                "Could not determine the current Wi-Fi frequency for {parent_interface}; refusing to guess an AP channel"
+            ),
+        }
     }
 
     /// Starts only the hostapd and dnsmasq instances configured by Wiretray.
@@ -340,6 +343,18 @@ where
     }
 
     async fn configure_ap_interface(&self) -> Result<()> {
+        // NetworkManager notices newly-created Wi-Fi interfaces immediately
+        // and may bring this one down while hostapd is configuring it. Only
+        // release Wiretray's virtual interface; the parent client interface
+        // remains managed and connected.
+        self.command_runner
+            .run(
+                "nmcli",
+                &["device", "set", DEFAULT_AP_INTERFACE, "managed", "no"],
+            )
+            .await
+            .context("Failed to reserve the AP interface for hostapd")?;
+
         self.command_runner
             .run(
                 "ip",
@@ -551,7 +566,18 @@ fn parse_link_frequency(output: &str) -> Option<u32> {
         .lines()
         .map(str::trim)
         .find_map(|line| line.strip_prefix("freq:"))
-        .and_then(|frequency| frequency.trim().parse().ok())
+        .and_then(parse_mhz)
+}
+
+fn parse_mhz(value: &str) -> Option<u32> {
+    let value = value.trim();
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+
+    if !fraction.bytes().all(|byte| byte == b'0') {
+        return None;
+    }
+
+    whole.parse().ok()
 }
 
 fn radio_config_for_frequency(frequency: u32) -> Result<ApRadioConfig> {
@@ -780,7 +806,7 @@ mod tests {
 
         assert_eq!(
             error,
-            "Concurrent hotspot mode is unavailable: missing required tools: iw, hostapd, dnsmasq"
+            "Concurrent hotspot mode is unavailable: missing required tools: iw, hostapd, dnsmasq, nmcli"
         );
     }
 
@@ -794,7 +820,7 @@ mod tests {
 
     #[tokio::test]
     async fn creates_and_configures_ap_interface_in_order() {
-        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 0, 0]);
+        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 0, 0, 0]);
         let backend = ConcurrentApBackend::with_runner(runner, RuntimePaths::discover());
 
         backend.create_ap_interface("wlp3s0").await.unwrap();
@@ -825,6 +851,13 @@ mod tests {
                     .collect(),
                 ),
                 (
+                    "nmcli".into(),
+                    vec!["device", "set", "wiretray-ap0", "managed", "no"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                ),
+                (
                     "ip".into(),
                     vec!["address", "add", "192.168.50.1/24", "dev", "wiretray-ap0"]
                         .into_iter()
@@ -844,7 +877,7 @@ mod tests {
 
     #[tokio::test]
     async fn deletes_created_interface_when_configuration_fails() {
-        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 1, 0]);
+        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 0, 1, 0]);
         let backend = ConcurrentApBackend::with_runner(runner, RuntimePaths::discover());
 
         let error = backend
@@ -868,7 +901,7 @@ mod tests {
 
     #[tokio::test]
     async fn reports_when_configuration_and_rollback_both_fail() {
-        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 1, 1]);
+        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 0, 1, 1]);
         let backend = ConcurrentApBackend::with_runner(runner, RuntimePaths::discover());
 
         let error = backend
@@ -1135,6 +1168,15 @@ mod tests {
                 channel: 6,
             }
         );
+    }
+
+    #[test]
+    fn parses_decimal_frequency_reported_by_newer_iw_versions() {
+        assert_eq!(
+            parse_link_frequency("Connected\n\tfreq: 2462.0\n"),
+            Some(2462)
+        );
+        assert_eq!(parse_link_frequency("Connected\n\tfreq: 2462.5\n"), None);
     }
 
     #[test]

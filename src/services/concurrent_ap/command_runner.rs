@@ -52,7 +52,16 @@ impl CommandRunner for SystemCommandRunner {
 
 fn ensure_success(command: &str, output: CommandOutput) -> Result<CommandOutput> {
     if !output.status.success() {
-        let details = output.stderr.trim();
+        // Some networking tools, notably hostapd, write startup failures to
+        // stdout instead of stderr even though they exit unsuccessfully.
+        let stderr = output.stderr.trim();
+        let stdout = output.stdout.trim();
+        let details = match (stderr.is_empty(), stdout.is_empty()) {
+            (false, false) => format!("{stderr}\n{stdout}"),
+            (false, true) => stderr.to_string(),
+            (true, false) => stdout.to_string(),
+            (true, true) => String::new(),
+        };
         if details.is_empty() {
             bail!("Command {command} failed with status {}", output.status);
         }
@@ -106,5 +115,23 @@ mod tests {
     #[test]
     fn rejects_missing_command() {
         assert!(find_in_path("wiretray-command-that-does-not-exist").is_none());
+    }
+
+    #[test]
+    fn reports_failure_details_written_to_stdout() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let error = ensure_success(
+            "hostapd",
+            CommandOutput {
+                status: ExitStatus::from_raw(1 << 8),
+                stdout: "nl80211: Could not configure driver mode\n".into(),
+                stderr: String::new(),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("nl80211: Could not configure driver mode"));
     }
 }
