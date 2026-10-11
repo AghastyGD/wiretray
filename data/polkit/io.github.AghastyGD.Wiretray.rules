@@ -1,0 +1,11 @@
+// Allow a local administrator's active desktop session to manage Wiretray's
+// concurrent hotspot without repeated authentication prompts.
+polkit.addRule(function(action, subject) {
+    if (action.id === "io.github.AghastyGD.Wiretray.concurrent-ap" &&
+        action.lookup("program") === "/usr/lib/wiretray/wiretray-helper" &&
+        subject.local &&
+        subject.active &&
+        (subject.isInGroup("wheel") || subject.isInGroup("sudo"))) {
+        return polkit.Result.YES;
+    }
+});

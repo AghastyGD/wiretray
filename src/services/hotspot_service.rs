@@ -12,14 +12,20 @@ use crate::models::{
     },
 };
 
+use super::concurrent_ap::ConcurrentApBackend;
 use super::network_service::NetworkService;
 
 const HOTSPOT_ID_PREFIX: &str = "wiretray-hotspot";
+const CONCURRENT_HOTSPOT_ID: &str = "wiretray-concurrent-ap";
 const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 enum HotspotBackendHandle {
     NetworkManager(NetworkService),
+    ConcurrentAp {
+        network: NetworkService,
+        backend: ConcurrentApBackend,
+    },
 }
 
 pub struct HotspotService {
@@ -28,17 +34,27 @@ pub struct HotspotService {
 
 impl HotspotService {
     pub async fn new() -> Result<Self> {
-        let network = NetworkService::new().await?;
+        Self::new_with_backend(HotspotBackend::NetworkManager).await
+    }
 
-        Ok(Self {
-            backend: HotspotBackendHandle::NetworkManager(network),
-        })
+    pub async fn new_with_backend(kind: HotspotBackend) -> Result<Self> {
+        let network = NetworkService::new().await?;
+        let backend = match kind {
+            HotspotBackend::NetworkManager => HotspotBackendHandle::NetworkManager(network),
+            HotspotBackend::ConcurrentAp => HotspotBackendHandle::ConcurrentAp {
+                network,
+                backend: ConcurrentApBackend::new(),
+            },
+        };
+
+        Ok(Self { backend })
     }
 
     #[allow(dead_code)]
     pub fn backend(&self) -> HotspotBackend {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(_) => HotspotBackend::NetworkManager,
+            HotspotBackendHandle::ConcurrentAp { .. } => HotspotBackend::ConcurrentAp,
         }
     }
 
@@ -49,12 +65,22 @@ impl HotspotService {
                 software_enabled: network.wireless_enabled().await?,
                 hardware_enabled: network.wireless_hardware_enabled().await?,
             }),
+            HotspotBackendHandle::ConcurrentAp { network, .. } => Ok(HotspotRadioState {
+                software_enabled: network.wireless_enabled().await?,
+                hardware_enabled: network.wireless_hardware_enabled().await?,
+            }),
         }
     }
 
     pub async fn candidate_devices(&self) -> Result<Vec<Device>> {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(network) => Ok(network
+                .wifi_devices()
+                .await?
+                .into_iter()
+                .filter(Device::supports_hotspot)
+                .collect()),
+            HotspotBackendHandle::ConcurrentAp { network, .. } => Ok(network
                 .wifi_devices()
                 .await?
                 .into_iter()
@@ -86,6 +112,12 @@ impl HotspotService {
         match &self.backend {
             HotspotBackendHandle::NetworkManager(network) => {
                 find_active_hotspot(network, interface).await
+            }
+            HotspotBackendHandle::ConcurrentAp { backend, .. } => {
+                let state = backend.load_runtime_state()?;
+                Ok(state
+                    .filter(|state| interface.is_none_or(|expected| state.ap_interface == expected))
+                    .map(active_concurrent_hotspot))
             }
         }
     }
@@ -140,6 +172,28 @@ impl HotspotService {
                     state: HotspotConnectionState::from(active_connection.state),
                 })
             }
+            HotspotBackendHandle::ConcurrentAp { network, backend } => {
+                let device = network
+                    .wifi_devices()
+                    .await?
+                    .into_iter()
+                    .find(|device| {
+                        device.interface == request.interface && device.supports_hotspot()
+                    })
+                    .with_context(|| {
+                        format!(
+                            "No AP-capable Wi-Fi device found for interface {}",
+                            request.interface
+                        )
+                    })?;
+
+                tracing::info!(
+                    parent_interface = device.interface,
+                    "Starting concurrent AP"
+                );
+                let state = backend.start_privileged(&request).await?;
+                Ok(active_concurrent_hotspot(state))
+            }
         }
     }
 
@@ -158,7 +212,28 @@ impl HotspotService {
 
                 Ok(Some(active_hotspot))
             }
+            HotspotBackendHandle::ConcurrentAp { backend, .. } => {
+                let Some(state) = backend.load_runtime_state()? else {
+                    return Ok(None);
+                };
+                let active = active_concurrent_hotspot(state);
+                backend.cleanup_privileged().await?;
+                Ok(Some(active))
+            }
         }
+    }
+}
+
+fn active_concurrent_hotspot(
+    state: crate::services::concurrent_ap::runtime_state::RuntimeState,
+) -> ActiveHotspot {
+    ActiveHotspot {
+        id: CONCURRENT_HOTSPOT_ID.into(),
+        uuid: String::new(),
+        interface: state.ap_interface,
+        connection_path: String::new(),
+        active_connection_path: String::new(),
+        state: HotspotConnectionState::Activated,
     }
 }
 

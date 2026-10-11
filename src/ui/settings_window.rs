@@ -1,13 +1,14 @@
 use gtk::Align;
 use gtk::prelude::*;
 use gtk::{
-    Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, Entry, Grid, Label,
-    Orientation, PasswordEntry, Separator, Stack, StackSwitcher,
+    Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, DropDown, Entry, Grid,
+    Label, Orientation, PasswordEntry, PolicyType, ScrolledWindow, Separator, Stack, StackSwitcher,
 };
 
 use tokio::runtime::Handle;
 
 use crate::application::hotspot as hotspot_app;
+use crate::models::hotspot::HotspotBackend;
 use crate::services::hotspot_service::HotspotService;
 use crate::settings::{
     autostart_service::AutostartService, hotspot_settings::HotspotSettings,
@@ -15,6 +16,17 @@ use crate::settings::{
 };
 
 const WINDOW_NAME: &str = "wiretray-settings";
+const BACKEND_STANDARD: u32 = 0;
+const BACKEND_KEEP_CONNECTED: u32 = 1;
+
+fn backend_description(selected: u32) -> &'static str {
+    match selected {
+        BACKEND_KEEP_CONNECTED => {
+            "Keeps your current internet connection active while sharing it. Requires a compatible Wi-Fi adapter and system authentication."
+        }
+        _ => "Works with most Wi-Fi adapters. Your current Wi-Fi connection may be disconnected.",
+    }
+}
 
 pub fn present(app: &Application, tokio_handle: Handle) {
     for win in app.windows() {
@@ -96,6 +108,43 @@ pub fn present(app: &Application, tokio_handle: Handle) {
         .css_classes(["dim-label"])
         .build();
 
+    let mode_label = Label::builder()
+        .label("Hotspot mode")
+        .halign(Align::Start)
+        .build();
+
+    let mode_dropdown = DropDown::from_strings(&["Standard hotspot", "Keep internet connection"]);
+    mode_dropdown.set_selected(match settings.backend {
+        HotspotBackend::NetworkManager => BACKEND_STANDARD,
+        HotspotBackend::ConcurrentAp => BACKEND_KEEP_CONNECTED,
+    });
+    mode_dropdown.set_hexpand(true);
+    mode_dropdown.set_sensitive(!active);
+
+    let mode_description = Label::builder()
+        .label(backend_description(mode_dropdown.selected()))
+        .halign(Align::Start)
+        .wrap(true)
+        .xalign(0.0)
+        .css_classes(["dim-label"])
+        .build();
+
+    {
+        let mode_description = mode_description.clone();
+        mode_dropdown.connect_selected_notify(move |dropdown| {
+            mode_description.set_label(backend_description(dropdown.selected()));
+
+            let backend = match dropdown.selected() {
+                BACKEND_KEEP_CONNECTED => HotspotBackend::ConcurrentAp,
+                _ => HotspotBackend::NetworkManager,
+            };
+
+            if let Err(err) = SettingsService::new().set_hotspot_backend(backend) {
+                tracing::error!("Failed to save hotspot mode: {err:#}");
+            }
+        });
+    }
+
     let grid = Grid::builder()
         .row_spacing(12)
         .column_spacing(16)
@@ -120,6 +169,10 @@ pub fn present(app: &Application, tokio_handle: Handle) {
     grid.attach(&channel_label, 0, 4, 1, 1);
     grid.attach(&channel_value, 1, 4, 1, 1);
 
+    grid.attach(&mode_label, 0, 5, 1, 1);
+    grid.attach(&mode_dropdown, 1, 5, 1, 1);
+    grid.attach(&mode_description, 1, 6, 1, 1);
+
     let hint = Label::builder()
         .label(
             "A password must contain 8–63 characters.\nLeave the field empty to create an open network.",
@@ -133,6 +186,9 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
     let error_label = Label::builder()
         .halign(Align::Start)
+        .xalign(0.0)
+        .wrap(true)
+        .selectable(true)
         .margin_start(24)
         .margin_end(24)
         .visible(false)
@@ -178,15 +234,21 @@ pub fn present(app: &Application, tokio_handle: Handle) {
         let status_label = status_label.clone();
         let start_btn_for_cb = start_btn.clone();
         let stop_btn_for_cb = stop_btn.clone();
+        let mode_dropdown_for_cb = mode_dropdown.clone();
+        let error_label_for_cb = error_label.clone();
 
         start_btn.connect_clicked(move |_| match handle.block_on(hotspot_app::start()) {
             Ok(()) => {
+                error_label_for_cb.set_visible(false);
                 status_label.set_label("● Active");
                 start_btn_for_cb.set_sensitive(false);
                 stop_btn_for_cb.set_sensitive(true);
+                mode_dropdown_for_cb.set_sensitive(false);
             }
             Err(err) => {
-                tracing::error!("Failed to start hotspot: {err:#}")
+                tracing::error!("Failed to start hotspot: {err:#}");
+                error_label_for_cb.set_label(&format!("Couldn’t start the hotspot.\n{err}"));
+                error_label_for_cb.set_visible(true);
             }
         });
     }
@@ -198,15 +260,21 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
         let start_btn_for_cb = start_btn.clone();
         let stop_btn_for_cb = stop_btn.clone();
+        let mode_dropdown_for_cb = mode_dropdown.clone();
+        let error_label_for_cb = error_label.clone();
 
         stop_btn.connect_clicked(move |_| match handle.block_on(hotspot_app::stop()) {
             Ok(()) => {
+                error_label_for_cb.set_visible(false);
                 status_label.set_label("○ Inactive");
                 start_btn_for_cb.set_sensitive(true);
                 stop_btn_for_cb.set_sensitive(false);
+                mode_dropdown_for_cb.set_sensitive(true);
             }
             Err(err) => {
                 tracing::error!("Failed to stop hotspot: {err:#}");
+                error_label_for_cb.set_label(&format!("Couldn’t stop the hotspot.\n{err}"));
+                error_label_for_cb.set_visible(true);
             }
         });
     }
@@ -219,6 +287,7 @@ pub fn present(app: &Application, tokio_handle: Handle) {
         let status_label_poll = status_label.clone();
         let start_btn_poll = start_btn.clone();
         let stop_btn_poll = stop_btn.clone();
+        let mode_dropdown_poll = mode_dropdown.clone();
 
         gtk::glib::timeout_add_seconds_local(2, move || {
             let active = handle.block_on(hotspot_app::is_active());
@@ -227,6 +296,7 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
             start_btn_poll.set_sensitive(!active);
             stop_btn_poll.set_sensitive(active);
+            mode_dropdown_poll.set_sensitive(!active);
 
             gtk::glib::ControlFlow::Continue
         });
@@ -234,6 +304,7 @@ pub fn present(app: &Application, tokio_handle: Handle) {
     {
         let ssid_entry = ssid_entry.clone();
         let passphrase_entry = passphrase_entry.clone();
+        let mode_dropdown = mode_dropdown.clone();
         let error_label = error_label.clone();
 
         save_btn.connect_clicked(move |_| {
@@ -256,6 +327,10 @@ pub fn present(app: &Application, tokio_handle: Handle) {
             let settings = HotspotSettings {
                 ssid: ssid_entry.text().to_string(),
                 passphrase,
+                backend: match mode_dropdown.selected() {
+                    BACKEND_KEEP_CONNECTED => HotspotBackend::ConcurrentAp,
+                    _ => HotspotBackend::NetworkManager,
+                },
             };
 
             tracing::info!("Saving settings");
@@ -300,6 +375,12 @@ pub fn present(app: &Application, tokio_handle: Handle) {
     hotspot_page.append(&hint);
     hotspot_page.append(&error_label);
     hotspot_page.append(&action_bar);
+
+    let hotspot_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .child(&hotspot_page)
+        .build();
 
     let device_page = GtkBox::builder()
         .orientation(Orientation::Vertical)
@@ -351,7 +432,7 @@ pub fn present(app: &Application, tokio_handle: Handle) {
 
     let stack = Stack::builder().hexpand(true).vexpand(true).build();
 
-    stack.add_titled(&hotspot_page, Some("Hotspot"), "Hostpost");
+    stack.add_titled(&hotspot_scroll, Some("Hotspot"), "Hotspot");
 
     stack.add_titled(&device_page, Some("device-info"), "Device Information");
 

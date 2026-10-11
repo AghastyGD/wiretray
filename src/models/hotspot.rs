@@ -1,12 +1,15 @@
+use serde::{Deserialize, Serialize};
+
 use super::device::Device;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotspotBackend {
     NetworkManager,
+    ConcurrentAp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotspotConfig {
     pub interface: String,
     pub ssid: String,

@@ -10,8 +10,15 @@ readme = "README.md"
 name = "wiretray-settings"
 path = "src/bin/wiretray_settings.rs"
 
+[[bin]]
+name = "wiretray-helper"
+path = "src/bin/wiretray_helper.rs"
+
 [dependencies]
 anyhow = "1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 tokio = { version = "1", features = ["full"] }
 
@@ -34,7 +41,7 @@ copyright = "2026, Augusto Domingos <augustodomingosvasco@gmail.com>"
 name = "wiretray"
 section = "net"
 priority = "optional"
-depends = "$auto, network-manager, libglib2.0-bin"
+depends = "$auto, network-manager, libglib2.0-bin, hostapd, dnsmasq, iptables, iproute2, iw, pkexec, procps"
 maintainer-scripts = "packaging/debian"
 extended-description = """
 Wiretray is a Linux Wi-Fi hotspot manager focused on quick and convenient hotspot control.
@@ -45,6 +52,7 @@ It allows hotspots to be managed directly from the system tray, making hotspot m
 assets = [
     ["target/release/wiretray", "usr/bin/", "755"],
     ["target/release/wiretray-settings", "usr/bin/", "755"],
+    ["target/release/wiretray-helper", "usr/lib/wiretray/", "755"],
 
     ["data/applications/io.github.AghastyGD.Wiretray.desktop",
      "usr/share/applications/",
@@ -56,6 +64,14 @@ assets = [
 
     ["data/io.github.AghastyGD.Wiretray.gschema.xml",
      "usr/share/glib-2.0/schemas/",
+     "644"],
+
+    ["data/polkit/io.github.AghastyGD.Wiretray.policy",
+     "usr/share/polkit-1/actions/",
+     "644"],
+
+    ["data/polkit/io.github.AghastyGD.Wiretray.rules",
+     "usr/share/polkit-1/rules.d/",
      "644"],
 
     ["README.md",
