@@ -2607,6 +2607,7 @@ dependencies = [
  "gtk4",
  "image",
  "ksni",
+ "libc",
  "serde",
  "serde_json",
  "tokio",

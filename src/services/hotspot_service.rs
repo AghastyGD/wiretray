@@ -191,7 +191,7 @@ impl HotspotService {
                     parent_interface = device.interface,
                     "Starting concurrent AP"
                 );
-                let state = backend.start(&request).await?;
+                let state = backend.start_privileged(&request).await?;
                 Ok(active_concurrent_hotspot(state))
             }
         }
@@ -217,7 +217,7 @@ impl HotspotService {
                     return Ok(None);
                 };
                 let active = active_concurrent_hotspot(state);
-                backend.cleanup().await?;
+                backend.cleanup_privileged().await?;
                 Ok(Some(active))
             }
         }

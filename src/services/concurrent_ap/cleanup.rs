@@ -210,7 +210,10 @@ mod tests {
         collections::VecDeque,
         os::unix::process::ExitStatusExt,
         process::ExitStatus,
-        sync::Mutex,
+        sync::{
+            Mutex,
+            atomic::{AtomicU64, Ordering},
+        },
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -357,12 +360,15 @@ mod tests {
     }
 
     fn test_paths() -> (std::path::PathBuf, RuntimePaths) {
+        static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
+        let sequence = NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let directory = std::env::temp_dir().join(format!(
-            "wiretray-cleanup-test-{}-{unique}",
+            "wiretray-cleanup-test-{}-{unique}-{sequence}",
             std::process::id()
         ));
         let paths = RuntimePaths::from_directory(&directory);

@@ -78,7 +78,9 @@ gsettings set io.github.AghastyGD.Wiretray hotspot-backend 'network-manager'
 
 The concurrent backend requires `iw`, `ip`, `hostapd`, `dnsmasq`, `iptables`,
 `sysctl`, and `pkexec`. The Wi-Fi adapter must support concurrent managed and AP
-interfaces. Privileged operations request authorization through PolicyKit.
+interfaces. A dedicated `wiretray-helper` batches privileged operations, so
+PolicyKit normally requests authorization once when starting and once when
+stopping. Privileged runtime files are kept under `/run/wiretray/<uid>/`.
 
 ## Installation
 

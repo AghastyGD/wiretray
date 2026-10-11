@@ -1,13 +1,15 @@
 pub mod cleanup;
 pub mod command_runner;
 pub mod firewall;
+pub mod helper_client;
+pub mod helper_protocol;
 pub mod process_manager;
 pub mod runtime_state;
 
 use anyhow::{Context, Result, bail};
 
 use self::{
-    command_runner::{CommandRunner, PkexecCommandRunner},
+    command_runner::{CommandRunner, SystemCommandRunner},
     firewall::FirewallState,
     process_manager::ServicePids,
     runtime_state::{RuntimePaths, RuntimeState},
@@ -24,20 +26,31 @@ pub const DEFAULT_AP_ADDRESS: &str = "192.168.50.1/24";
 ///
 /// This backend is intentionally not connected to `HotspotService` yet. The
 /// existing NetworkManager start/stop behavior remains the only active path.
-pub struct ConcurrentApBackend<R = PkexecCommandRunner> {
+pub struct ConcurrentApBackend<R = SystemCommandRunner> {
     command_runner: R,
     runtime_paths: RuntimePaths,
 }
 
-impl ConcurrentApBackend<PkexecCommandRunner> {
+impl ConcurrentApBackend<SystemCommandRunner> {
     pub fn new() -> Self {
-        Self::with_runner(PkexecCommandRunner, RuntimePaths::discover())
+        Self::with_runner(SystemCommandRunner, RuntimePaths::discover())
     }
 }
 
-impl Default for ConcurrentApBackend<PkexecCommandRunner> {
+impl Default for ConcurrentApBackend<SystemCommandRunner> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ConcurrentApBackend<SystemCommandRunner> {
+    pub async fn start_privileged(&self, hotspot: &HotspotConfig) -> Result<RuntimeState> {
+        self.check_dependencies()?;
+        helper_client::start(hotspot, &self.runtime_paths).await
+    }
+
+    pub async fn cleanup_privileged(&self) -> Result<bool> {
+        helper_client::stop(&self.runtime_paths).await
     }
 }
 

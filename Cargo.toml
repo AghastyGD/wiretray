@@ -10,8 +10,13 @@ readme = "README.md"
 name = "wiretray-settings"
 path = "src/bin/wiretray_settings.rs"
 
+[[bin]]
+name = "wiretray-helper"
+path = "src/bin/wiretray_helper.rs"
+
 [dependencies]
 anyhow = "1"
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

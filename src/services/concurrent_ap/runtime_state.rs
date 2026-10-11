@@ -1,14 +1,11 @@
 use std::{
-    env, fs,
+    fs,
     io::Write,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-const RUNTIME_DIRECTORY_NAME: &str = "wiretray";
-const FALLBACK_RUNTIME_DIRECTORY: &str = "/tmp/wiretray";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimePaths {
@@ -24,11 +21,9 @@ pub struct RuntimePaths {
 
 impl RuntimePaths {
     pub fn discover() -> Self {
-        let directory = env::var_os("XDG_RUNTIME_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .map(|base| base.join(RUNTIME_DIRECTORY_NAME))
-            .unwrap_or_else(|| PathBuf::from(FALLBACK_RUNTIME_DIRECTORY));
+        // SAFETY: geteuid has no preconditions and does not retain pointers.
+        let uid = unsafe { libc::geteuid() };
+        let directory = PathBuf::from(format!("/run/wiretray/{uid}"));
 
         Self::from_directory(directory)
     }
@@ -58,9 +53,16 @@ impl RuntimePaths {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-            fs::set_permissions(&self.directory, fs::Permissions::from_mode(0o700)).with_context(
+            let metadata = fs::metadata(&self.directory)?;
+            let mode = if metadata.uid() == 0 && self.directory.starts_with("/run/wiretray") {
+                0o711
+            } else {
+                0o700
+            };
+
+            fs::set_permissions(&self.directory, fs::Permissions::from_mode(mode)).with_context(
                 || {
                     format!(
                         "Failed to secure Wiretray runtime directory {}",
@@ -82,7 +84,7 @@ impl RuntimePaths {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
         }
 
         let mut file = options
@@ -169,6 +171,19 @@ impl RuntimeState {
             format!("Failed to publish runtime state {}", paths.state.display())
         })?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&paths.state, fs::Permissions::from_mode(0o644)).with_context(
+                || {
+                    format!(
+                        "Failed to make runtime state readable {}",
+                        paths.state.display()
+                    )
+                },
+            )?;
+        }
+
         Ok(())
     }
 }
@@ -241,5 +256,42 @@ mod tests {
         let state: RuntimeState = serde_json::from_str(json).unwrap();
 
         assert!(state.ip_forwarding_was_enabled);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_state_is_readable_but_not_writable_by_unprivileged_peers() {
+        use std::{
+            os::unix::fs::PermissionsExt,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "wiretray-state-test-{}-{unique}",
+            std::process::id()
+        ));
+        let paths = RuntimePaths::from_directory(&directory);
+        let state = RuntimeState {
+            ap_interface: "wiretray-ap0".into(),
+            ap_interface_created: true,
+            upstream_interface: "wlp3s0".into(),
+            ap_ip: "192.168.50.1/24".into(),
+            hostapd_pid: Some(1234),
+            dnsmasq_pid: Some(1235),
+            ip_forwarding_was_enabled: false,
+            iptables_rules: Vec::new(),
+        };
+
+        state.save(&paths).unwrap();
+
+        assert_eq!(
+            fs::metadata(&paths.state).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }
