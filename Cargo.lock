@@ -2607,6 +2607,8 @@ dependencies = [
  "gtk4",
  "image",
  "ksni",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
