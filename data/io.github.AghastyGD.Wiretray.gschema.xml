@@ -17,8 +17,8 @@
 
     <key name="hotspot-backend" type="s">
       <default>'network-manager'</default>
-      <summary>Hotspot backend</summary>
-      <description>Internal backend selector: network-manager or concurrent-ap</description>
+      <summary>Hotspot mode</summary>
+      <description>Controls whether the hotspot uses standard mode or keeps the current internet connection active</description>
     </key>
   </schema>
 </schemalist>

@@ -32,6 +32,7 @@ impl SettingsService {
         let settings = HotspotSettings {
             ssid: self.settings.string(KEY_SSID).to_string(),
             passphrase: self.settings.string(KEY_PASSPHRASE).to_string(),
+            backend: self.hotspot_backend(),
         };
 
         Ok(settings)
@@ -42,6 +43,8 @@ impl SettingsService {
 
         self.settings
             .set_string(KEY_PASSPHRASE, &settings.passphrase)?;
+
+        self.set_hotspot_backend(settings.backend)?;
 
         gio::Settings::sync(); // Ensure changes are flushed before short-lived processes exit.
 
@@ -60,5 +63,16 @@ impl SettingsService {
                 HotspotBackend::NetworkManager
             }
         }
+    }
+
+    pub fn set_hotspot_backend(&self, backend: HotspotBackend) -> Result<()> {
+        let value = match backend {
+            HotspotBackend::NetworkManager => "network-manager",
+            HotspotBackend::ConcurrentAp => "concurrent-ap",
+        };
+
+        self.settings.set_string(KEY_HOTSPOT_BACKEND, value)?;
+        gio::Settings::sync();
+        Ok(())
     }
 }
