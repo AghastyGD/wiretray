@@ -18,7 +18,13 @@ pub struct CommandOutput {
 pub trait CommandRunner {
     fn command_exists(&self, command: &str) -> bool;
 
-    async fn run(&self, command: &str, args: &[&str]) -> Result<CommandOutput>;
+    async fn output(&self, command: &str, args: &[&str]) -> Result<CommandOutput>;
+
+    async fn run(&self, command: &str, args: &[&str]) -> Result<CommandOutput> {
+        let output = self.output(command, args).await?;
+
+        ensure_success(command, output)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -29,32 +35,34 @@ impl CommandRunner for SystemCommandRunner {
         find_in_path(command).is_some()
     }
 
-    async fn run(&self, command: &str, args: &[&str]) -> Result<CommandOutput> {
+    async fn output(&self, command: &str, args: &[&str]) -> Result<CommandOutput> {
         let output = Command::new(command)
             .args(args)
             .output()
             .await
             .with_context(|| format!("Failed to execute {command}"))?;
 
-        let result = CommandOutput {
+        Ok(CommandOutput {
             status: output.status,
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        };
-
-        if !result.status.success() {
-            let details = result.stderr.trim();
-            if details.is_empty() {
-                bail!("Command {command} failed with status {}", result.status);
-            }
-            bail!(
-                "Command {command} failed with status {}: {details}",
-                result.status
-            );
-        }
-
-        Ok(result)
+        })
     }
+}
+
+fn ensure_success(command: &str, output: CommandOutput) -> Result<CommandOutput> {
+    if !output.status.success() {
+        let details = output.stderr.trim();
+        if details.is_empty() {
+            bail!("Command {command} failed with status {}", output.status);
+        }
+        bail!(
+            "Command {command} failed with status {}: {details}",
+            output.status
+        );
+    }
+
+    Ok(output)
 }
 
 fn find_in_path(command: impl AsRef<OsStr>) -> Option<PathBuf> {

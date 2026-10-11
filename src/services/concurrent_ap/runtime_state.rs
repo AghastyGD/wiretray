@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -16,6 +17,7 @@ pub struct RuntimePaths {
     pub dnsmasq_config: PathBuf,
     pub hostapd_pid: PathBuf,
     pub dnsmasq_pid: PathBuf,
+    pub dnsmasq_leases: PathBuf,
     pub state: PathBuf,
 }
 
@@ -38,6 +40,7 @@ impl RuntimePaths {
             dnsmasq_config: directory.join("dnsmasq.conf"),
             hostapd_pid: directory.join("hostapd.pid"),
             dnsmasq_pid: directory.join("dnsmasq.pid"),
+            dnsmasq_leases: directory.join("dnsmasq.leases"),
             state: directory.join("state.json"),
             directory,
         }
@@ -63,6 +66,34 @@ impl RuntimePaths {
                     )
                 },
             )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn write_secure_file(&self, path: &Path, contents: &[u8]) -> Result<()> {
+        self.ensure_directory()?;
+
+        let mut options = fs::OpenOptions::new();
+        options.create(true).truncate(true).write(true);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+
+        let mut file = options
+            .open(path)
+            .with_context(|| format!("Failed to open runtime file {}", path.display()))?;
+        file.write_all(contents)
+            .with_context(|| format!("Failed to write runtime file {}", path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("Failed to secure runtime file {}", path.display()))?;
         }
 
         Ok(())
@@ -109,12 +140,14 @@ impl RuntimeState {
         let contents =
             serde_json::to_vec_pretty(self).context("Failed to serialize runtime state")?;
 
-        fs::write(&temporary_path, contents).with_context(|| {
-            format!(
-                "Failed to write temporary runtime state {}",
-                temporary_path.display()
-            )
-        })?;
+        paths
+            .write_secure_file(&temporary_path, &contents)
+            .with_context(|| {
+                format!(
+                    "Failed to write temporary runtime state {}",
+                    temporary_path.display()
+                )
+            })?;
         fs::rename(&temporary_path, &paths.state).with_context(|| {
             format!("Failed to publish runtime state {}", paths.state.display())
         })?;
@@ -142,6 +175,10 @@ mod tests {
         assert_eq!(
             paths.state,
             PathBuf::from("/run/user/1000/wiretray/state.json")
+        );
+        assert_eq!(
+            paths.dnsmasq_leases,
+            PathBuf::from("/run/user/1000/wiretray/dnsmasq.leases")
         );
     }
 
