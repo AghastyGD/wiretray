@@ -14,5 +14,11 @@
       <default>''</default>
       <summary>Hotspot passphrase</summary>
     </key>
+
+    <key name="hotspot-backend" type="s">
+      <default>'network-manager'</default>
+      <summary>Hotspot backend</summary>
+      <description>Internal backend selector: network-manager or concurrent-ap</description>
+    </key>
   </schema>
 </schemalist>

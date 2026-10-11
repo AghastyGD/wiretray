@@ -3,11 +3,13 @@ use gio::Settings;
 use gio::prelude::SettingsExt;
 
 use super::hotspot_settings::HotspotSettings;
+use crate::models::hotspot::HotspotBackend;
 
 const SCHEMA_ID: &str = "io.github.AghastyGD.Wiretray";
 
 const KEY_SSID: &str = "ssid";
 const KEY_PASSPHRASE: &str = "passphrase";
+const KEY_HOTSPOT_BACKEND: &str = "hotspot-backend";
 
 pub struct SettingsService {
     settings: Settings,
@@ -44,5 +46,19 @@ impl SettingsService {
         gio::Settings::sync(); // Ensure changes are flushed before short-lived processes exit.
 
         Ok(())
+    }
+
+    pub fn hotspot_backend(&self) -> HotspotBackend {
+        match self.settings.string(KEY_HOTSPOT_BACKEND).as_str() {
+            "concurrent-ap" => HotspotBackend::ConcurrentAp,
+            "network-manager" => HotspotBackend::NetworkManager,
+            value => {
+                tracing::warn!(
+                    backend = value,
+                    "Unknown hotspot backend; using NetworkManager"
+                );
+                HotspotBackend::NetworkManager
+            }
+        }
     }
 }

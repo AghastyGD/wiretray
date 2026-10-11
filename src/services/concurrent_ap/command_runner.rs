@@ -50,6 +50,41 @@ impl CommandRunner for SystemCommandRunner {
     }
 }
 
+/// Runs privileged operations through pkexec while leaving read-only commands
+/// unprivileged. All elevation policy for the backend lives here.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PkexecCommandRunner;
+
+impl CommandRunner for PkexecCommandRunner {
+    fn command_exists(&self, command: &str) -> bool {
+        SystemCommandRunner.command_exists(command)
+    }
+
+    async fn output(&self, command: &str, args: &[&str]) -> Result<CommandOutput> {
+        if requires_privileges(command, args) {
+            let arguments = std::iter::once(command)
+                .chain(args.iter().copied())
+                .collect::<Vec<_>>();
+            SystemCommandRunner.output("pkexec", &arguments).await
+        } else {
+            SystemCommandRunner.output(command, args).await
+        }
+    }
+}
+
+fn requires_privileges(command: &str, args: &[&str]) -> bool {
+    match command {
+        "hostapd" | "dnsmasq" | "iptables" | "kill" => true,
+        "iw" => true,
+        "sysctl" => args.first() == Some(&"-w"),
+        "ip" => !matches!(
+            args,
+            ["route", "show", "default"] | ["link", "show", "dev", _]
+        ),
+        _ => false,
+    }
+}
+
 fn ensure_success(command: &str, output: CommandOutput) -> Result<CommandOutput> {
     if !output.status.success() {
         let details = output.stderr.trim();
@@ -106,5 +141,24 @@ mod tests {
     #[test]
     fn rejects_missing_command() {
         assert!(find_in_path("wiretray-command-that-does-not-exist").is_none());
+    }
+
+    #[test]
+    fn classifies_only_mutating_network_commands_as_privileged() {
+        assert!(!requires_privileges("ip", &["route", "show", "default"]));
+        assert!(!requires_privileges(
+            "ip",
+            &["link", "show", "dev", "wiretray-ap0"]
+        ));
+        assert!(!requires_privileges(
+            "sysctl",
+            &["-n", "net.ipv4.ip_forward"]
+        ));
+        assert!(requires_privileges(
+            "ip",
+            &["address", "add", "192.168.50.1/24", "dev", "wiretray-ap0"]
+        ));
+        assert!(requires_privileges("iptables", &["-t", "nat", "-A"]));
+        assert!(requires_privileges("hostapd", &["-B"]));
     }
 }

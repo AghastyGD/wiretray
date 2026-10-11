@@ -7,14 +7,16 @@ pub mod runtime_state;
 use anyhow::{Context, Result, bail};
 
 use self::{
-    command_runner::{CommandRunner, SystemCommandRunner},
+    command_runner::{CommandRunner, PkexecCommandRunner},
     firewall::FirewallState,
     process_manager::ServicePids,
-    runtime_state::RuntimePaths,
+    runtime_state::{RuntimePaths, RuntimeState},
 };
 use crate::models::hotspot::HotspotConfig;
 
-const REQUIRED_COMMANDS: [&str; 6] = ["iw", "ip", "hostapd", "dnsmasq", "iptables", "sysctl"];
+const REQUIRED_COMMANDS: [&str; 7] = [
+    "iw", "ip", "hostapd", "dnsmasq", "iptables", "sysctl", "pkexec",
+];
 pub const DEFAULT_AP_INTERFACE: &str = "wiretray-ap0";
 pub const DEFAULT_AP_ADDRESS: &str = "192.168.50.1/24";
 
@@ -22,18 +24,18 @@ pub const DEFAULT_AP_ADDRESS: &str = "192.168.50.1/24";
 ///
 /// This backend is intentionally not connected to `HotspotService` yet. The
 /// existing NetworkManager start/stop behavior remains the only active path.
-pub struct ConcurrentApBackend<R = SystemCommandRunner> {
+pub struct ConcurrentApBackend<R = PkexecCommandRunner> {
     command_runner: R,
     runtime_paths: RuntimePaths,
 }
 
-impl ConcurrentApBackend<SystemCommandRunner> {
+impl ConcurrentApBackend<PkexecCommandRunner> {
     pub fn new() -> Self {
-        Self::with_runner(SystemCommandRunner, RuntimePaths::discover())
+        Self::with_runner(PkexecCommandRunner, RuntimePaths::discover())
     }
 }
 
-impl Default for ConcurrentApBackend<SystemCommandRunner> {
+impl Default for ConcurrentApBackend<PkexecCommandRunner> {
     fn default() -> Self {
         Self::new()
     }
@@ -180,6 +182,71 @@ where
     /// Cleans resources recorded in state.json. Returns false when no state exists.
     pub async fn cleanup(&self) -> Result<bool> {
         cleanup::cleanup(&self.command_runner, &self.runtime_paths).await
+    }
+
+    /// Runs the complete startup as a staged transaction with persisted state.
+    pub async fn start(&self, hotspot: &HotspotConfig) -> Result<RuntimeState> {
+        self.check_dependencies()?;
+        validate_interface_name(&hotspot.interface, "Parent Wi-Fi interface")?;
+
+        if RuntimeState::load(&self.runtime_paths.state)?.is_some() {
+            bail!("Concurrent hotspot state already exists; stop or clean it before starting");
+        }
+
+        let upstream_interface = self.detect_upstream_interface().await?;
+        let mut state = RuntimeState {
+            ap_interface: DEFAULT_AP_INTERFACE.into(),
+            ap_interface_created: false,
+            upstream_interface,
+            ap_ip: DEFAULT_AP_ADDRESS.into(),
+            hostapd_pid: None,
+            dnsmasq_pid: None,
+            ip_forwarding_was_enabled: true,
+            iptables_rules: Vec::new(),
+        };
+
+        // Persist intent before the first system mutation so a crash can be
+        // recovered through the same idempotent cleanup path.
+        state.save(&self.runtime_paths)?;
+
+        let startup_result: Result<()> = async {
+            self.create_ap_interface(&hotspot.interface).await?;
+            state.ap_interface_created = true;
+            state.save(&self.runtime_paths)?;
+            self.write_service_configs(hotspot)?;
+
+            let pids = self.start_services().await?;
+            state.hostapd_pid = Some(pids.hostapd);
+            state.dnsmasq_pid = Some(pids.dnsmasq);
+            state.save(&self.runtime_paths)?;
+
+            let firewall = self
+                .enable_network_sharing(&state.upstream_interface)
+                .await?;
+            state.ip_forwarding_was_enabled = firewall.ip_forwarding_was_enabled;
+            state.iptables_rules = firewall.iptables_rules;
+            state.save(&self.runtime_paths)?;
+
+            Ok(())
+        }
+        .await;
+
+        if let Err(startup_error) = startup_result {
+            return match cleanup::cleanup_state(&self.command_runner, &self.runtime_paths, &state)
+                .await
+            {
+                Ok(()) => Err(startup_error.context("Concurrent hotspot startup was rolled back")),
+                Err(cleanup_error) => Err(anyhow::anyhow!(
+                    "Concurrent hotspot startup failed: {startup_error:#}; rollback also failed: {cleanup_error:#}"
+                )),
+            };
+        }
+
+        Ok(state)
+    }
+
+    pub fn load_runtime_state(&self) -> Result<Option<RuntimeState>> {
+        RuntimeState::load(&self.runtime_paths.state)
     }
 
     async fn interface_exists(&self, interface: &str) -> Result<bool> {
@@ -356,7 +423,11 @@ mod tests {
         collections::{HashSet, VecDeque},
         os::unix::process::ExitStatusExt,
         process::ExitStatus,
-        sync::Mutex,
+        sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use anyhow::Result;
@@ -372,6 +443,12 @@ mod tests {
 
     struct ScriptedCommandRunner {
         outputs: Mutex<VecDeque<CommandOutput>>,
+        calls: Mutex<Vec<(String, Vec<String>)>>,
+    }
+
+    struct TransactionalRunner {
+        paths: RuntimePaths,
+        interface_exists: AtomicBool,
         calls: Mutex<Vec<(String, Vec<String>)>>,
     }
 
@@ -398,6 +475,16 @@ mod tests {
 
         fn calls(&self) -> Vec<(String, Vec<String>)> {
             self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl TransactionalRunner {
+        fn new(paths: RuntimePaths) -> Self {
+            Self {
+                paths,
+                interface_exists: AtomicBool::new(false),
+                calls: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -448,6 +535,62 @@ mod tests {
         }
     }
 
+    impl CommandRunner for TransactionalRunner {
+        fn command_exists(&self, _command: &str) -> bool {
+            true
+        }
+
+        async fn output(&self, command: &str, args: &[&str]) -> Result<CommandOutput> {
+            self.calls.lock().unwrap().push((
+                command.to_string(),
+                args.iter().map(|argument| argument.to_string()).collect(),
+            ));
+
+            let mut status = 0;
+            let mut stdout = String::new();
+
+            match (command, args) {
+                ("ip", ["route", "show", "default"]) => {
+                    stdout = "default via 10.0.0.1 dev enp2s0 metric 100\n".into();
+                }
+                ("ip", ["link", "show", "dev", DEFAULT_AP_INTERFACE]) => {
+                    status = i32::from(!self.interface_exists.load(Ordering::SeqCst));
+                }
+                (
+                    "iw",
+                    [
+                        "dev",
+                        _,
+                        "interface",
+                        "add",
+                        DEFAULT_AP_INTERFACE,
+                        "type",
+                        "__ap",
+                    ],
+                ) => {
+                    self.interface_exists.store(true, Ordering::SeqCst);
+                }
+                ("iw", ["dev", DEFAULT_AP_INTERFACE, "del"]) => {
+                    self.interface_exists.store(false, Ordering::SeqCst);
+                }
+                ("hostapd", _) => std::fs::write(&self.paths.hostapd_pid, "4294967001\n")?,
+                ("dnsmasq", _) => std::fs::write(&self.paths.dnsmasq_pid, "4294967002\n")?,
+                ("sysctl", ["-n", "net.ipv4.ip_forward"]) => stdout = "0\n".into(),
+                _ => {}
+            }
+
+            Ok(CommandOutput {
+                status: ExitStatus::from_raw(status << 8),
+                stdout,
+                stderr: if status == 0 {
+                    String::new()
+                } else {
+                    "not found".into()
+                },
+            })
+        }
+    }
+
     #[test]
     fn dependency_check_succeeds_when_all_tools_exist() {
         let runner = FakeCommandRunner {
@@ -461,7 +604,7 @@ mod tests {
     #[test]
     fn dependency_check_lists_every_missing_tool() {
         let runner = FakeCommandRunner {
-            available: HashSet::from(["ip", "iptables", "sysctl"]),
+            available: HashSet::from(["ip", "iptables", "sysctl", "pkexec"]),
         };
         let backend = ConcurrentApBackend::with_runner(runner, RuntimePaths::discover());
 
@@ -704,6 +847,41 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn completes_transactional_start_and_persists_cleanup_state() {
+        let directory = test_runtime_directory("startup");
+        let paths = RuntimePaths::from_directory(&directory);
+        let runner = TransactionalRunner::new(paths.clone());
+        let backend = ConcurrentApBackend::with_runner(runner, paths.clone());
+        let hotspot = HotspotConfig {
+            interface: "wlp3s0".into(),
+            ssid: "Wiretray".into(),
+            passphrase: Some("12345678".into()),
+        };
+
+        let state = backend.start(&hotspot).await.unwrap();
+
+        assert_eq!(state.upstream_interface, "enp2s0");
+        assert_eq!(state.hostapd_pid, Some(4_294_967_001));
+        assert_eq!(state.dnsmasq_pid, Some(4_294_967_002));
+        assert_eq!(state.iptables_rules.len(), 3);
+        assert_eq!(backend.load_runtime_state().unwrap(), Some(state));
+
+        backend.cleanup().await.unwrap();
+        assert!(!directory.exists());
+    }
+
+    fn test_runtime_directory(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "wiretray-{label}-test-{}-{unique}",
+            std::process::id()
+        ))
     }
 
     #[test]

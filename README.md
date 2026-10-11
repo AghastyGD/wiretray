@@ -46,12 +46,13 @@ Available today:
 - [x] Autostart on login
     
 - [x] Wi-Fi capability detection
+
+- [x] Experimental concurrent AP + Client backend
     
 
 Currently in progress:
 
 -   Better error reporting
--   Concurrent AP + Client support
 
 ## Requirements
 
@@ -59,6 +60,25 @@ Currently in progress:
 -   NetworkManager
 -   A Wi-Fi adapter with Access Point (AP) support
 -   A desktop environment or panel with StatusNotifierItem/AppIndicator support
+
+## Experimental Concurrent AP Backend
+
+The NetworkManager backend remains the default. To opt in to the experimental
+AP + Client backend internally, run:
+
+```
+gsettings set io.github.AghastyGD.Wiretray hotspot-backend 'concurrent-ap'
+```
+
+To return to the default backend:
+
+```
+gsettings set io.github.AghastyGD.Wiretray hotspot-backend 'network-manager'
+```
+
+The concurrent backend requires `iw`, `ip`, `hostapd`, `dnsmasq`, `iptables`,
+`sysctl`, and `pkexec`. The Wi-Fi adapter must support concurrent managed and AP
+interfaces. Privileged operations request authorization through PolicyKit.
 
 ## Installation
 

@@ -19,7 +19,19 @@ where
         return Ok(false);
     };
 
-    validate_state(&state)?;
+    cleanup_state(runner, paths, &state).await?;
+    Ok(true)
+}
+
+pub(super) async fn cleanup_state<R>(
+    runner: &R,
+    paths: &RuntimePaths,
+    state: &RuntimeState,
+) -> Result<()>
+where
+    R: CommandRunner,
+{
+    validate_state(state)?;
 
     let mut errors = Vec::new();
 
@@ -57,7 +69,9 @@ where
         errors.push(format!("failed to restore firewall state: {error:#}"));
     }
 
-    if let Err(error) = remove_ap_interface(runner, &state).await {
+    if state.ap_interface_created
+        && let Err(error) = remove_ap_interface(runner, state).await
+    {
         errors.push(format!("failed to remove AP interface: {error:#}"));
     }
 
@@ -73,7 +87,7 @@ where
     if errors.is_empty() {
         remove_file_if_present(&paths.state)?;
         remove_directory_if_empty(&paths.directory)?;
-        Ok(true)
+        Ok(())
     } else {
         bail!(errors.join("; "))
     }
@@ -332,6 +346,7 @@ mod tests {
     fn valid_state(iptables_rules: Vec<IptablesRule>) -> RuntimeState {
         RuntimeState {
             ap_interface: DEFAULT_AP_INTERFACE.into(),
+            ap_interface_created: true,
             upstream_interface: "enp2s0".into(),
             ap_ip: DEFAULT_AP_ADDRESS.into(),
             hostapd_pid: None,

@@ -1,20 +1,33 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::{
-    models::hotspot::HotspotConfig, services::hotspot_service::HotspotService,
+    models::{
+        device_state::DeviceState,
+        hotspot::{HotspotBackend, HotspotConfig},
+    },
+    services::{concurrent_ap::ConcurrentApBackend, hotspot_service::HotspotService},
     settings::service::SettingsService,
 };
 
 pub async fn start() -> Result<()> {
-    let hotspot = HotspotService::new().await?;
+    if active_backend_kind().await?.is_some() {
+        bail!("A Wiretray hotspot is already active");
+    }
 
-    let interface = hotspot
-        .candidate_devices()
-        .await?
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("No Wi-Fi device available for hotspot"))?
-        .interface;
+    let backend = SettingsService::new().hotspot_backend();
+    let hotspot = HotspotService::new_with_backend(backend).await?;
+
+    let devices = hotspot.candidate_devices().await?;
+    let interface = if backend == HotspotBackend::ConcurrentAp {
+        devices
+            .iter()
+            .find(|device| device.state == DeviceState::Activated)
+            .or_else(|| devices.first())
+    } else {
+        devices.first()
+    }
+    .map(|device| device.interface.clone())
+    .ok_or_else(|| anyhow::anyhow!("No Wi-Fi device available for hotspot"))?;
 
     let mut config = load_settings();
     config.interface = interface;
@@ -30,26 +43,39 @@ pub async fn start() -> Result<()> {
 }
 
 pub async fn stop() -> Result<()> {
-    let hotspot = HotspotService::new().await?;
+    let Some(backend) = active_backend_kind().await? else {
+        tracing::info!("No Wiretray hotspot is active");
+        return Ok(());
+    };
+
+    let hotspot = HotspotService::new_with_backend(backend).await?;
     let stopped = hotspot.stop(None).await?;
     tracing::info!(stopped = stopped.is_some(), "Hotspot stopped");
     Ok(())
 }
 
 pub async fn is_active() -> bool {
-    match HotspotService::new().await {
-        Ok(svc) => match svc.active_hotspot(None).await {
-            Ok(active) => active.is_some(),
-            Err(e) => {
-                tracing::warn!("Failed to determine initial hotspot state: {e:#}");
-                false
-            }
-        },
+    match active_backend_kind().await {
+        Ok(active) => active.is_some(),
         Err(e) => {
-            tracing::warn!("Failed to initialize hotspot service: {e:#}");
+            tracing::warn!("Failed to determine hotspot state: {e:#}");
             false
         }
     }
+}
+
+async fn active_backend_kind() -> Result<Option<HotspotBackend>> {
+    let concurrent = ConcurrentApBackend::new();
+    if concurrent.load_runtime_state()?.is_some() {
+        return Ok(Some(HotspotBackend::ConcurrentAp));
+    }
+
+    let network_manager = HotspotService::new().await?;
+    if network_manager.active_hotspot(None).await?.is_some() {
+        return Ok(Some(HotspotBackend::NetworkManager));
+    }
+
+    Ok(None)
 }
 
 fn load_settings() -> HotspotConfig {

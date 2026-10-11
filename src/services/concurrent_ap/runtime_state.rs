@@ -112,6 +112,8 @@ pub struct IptablesRule {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeState {
     pub ap_interface: String,
+    #[serde(default = "default_ap_interface_created")]
+    pub ap_interface_created: bool,
     pub upstream_interface: String,
     pub ap_ip: String,
     pub hostapd_pid: Option<u32>,
@@ -124,6 +126,12 @@ pub struct RuntimeState {
 fn default_ip_forwarding_was_enabled() -> bool {
     // Older state files did not record ownership of this global setting. The
     // safe fallback is to leave forwarding enabled during cleanup.
+    true
+}
+
+fn default_ap_interface_created() -> bool {
+    // State files from before staged startup were only written for an interface
+    // Wiretray intended to own.
     true
 }
 
@@ -195,6 +203,7 @@ mod tests {
     fn runtime_state_round_trips_as_json() {
         let state = RuntimeState {
             ap_interface: "wiretray-ap0".into(),
+            ap_interface_created: true,
             upstream_interface: "wlp3s0".into(),
             ap_ip: "192.168.50.1/24".into(),
             hostapd_pid: Some(1234),
