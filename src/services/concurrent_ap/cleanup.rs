@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use super::{
     DEFAULT_AP_ADDRESS, DEFAULT_AP_INTERFACE,
@@ -152,20 +152,38 @@ where
         )
         .await;
 
+    // Bring the vif down before deleting it so the driver releases the AP
+    // context. The next `interface add` otherwise fails to open with EBUSY.
+    let down_result = runner
+        .run(
+            "ip",
+            &["link", "set", "dev", state.ap_interface.as_str(), "down"],
+        )
+        .await;
+
     let interface_result = runner
         .run("iw", &["dev", state.ap_interface.as_str(), "del"])
         .await;
 
-    match (address_result, interface_result) {
+    match interface_result {
         // Deleting the interface also removes all addresses assigned to it, so
-        // a missing address is harmless once interface deletion succeeds.
-        (_, Ok(_)) => Ok(()),
-        (Ok(_), Err(interface_error)) => {
-            Err(interface_error).context("Failed to delete virtual AP interface")
+        // a missing address or a failed down is harmless once deletion succeeds.
+        Ok(_) => Ok(()),
+        Err(interface_error) => {
+            let mut details = Vec::new();
+            if let Err(address_error) = address_result {
+                details.push(format!("failed to remove AP address: {address_error:#}"));
+            }
+            if let Err(down_error) = down_result {
+                details.push(format!(
+                    "failed to set the AP interface down: {down_error:#}"
+                ));
+            }
+            details.push(format!(
+                "failed to delete virtual AP interface: {interface_error:#}"
+            ));
+            bail!(details.join("; "))
         }
-        (Err(address_error), Err(interface_error)) => bail!(
-            "failed to remove AP address: {address_error:#}; failed to delete virtual AP interface: {interface_error:#}"
-        ),
     }
 }
 
@@ -291,7 +309,7 @@ mod tests {
         paths
             .write_secure_file(&paths.dnsmasq_config, b"dnsmasq")
             .unwrap();
-        let runner = ScriptedRunner::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let runner = ScriptedRunner::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         assert!(cleanup(&runner, &paths).await.unwrap());
 
