@@ -6,6 +6,8 @@ pub mod helper_protocol;
 pub mod process_manager;
 pub mod runtime_state;
 
+use std::time::Duration;
+
 use anyhow::{Context, Result, bail};
 
 use self::{
@@ -149,7 +151,7 @@ where
                 )
             })?;
 
-        if let Err(error) = self.configure_ap_interface().await {
+        if let Err(error) = self.configure_ap_interface(parent_interface).await {
             return match self.delete_ap_interface().await {
                 Ok(()) => Err(error.context(format!(
                     "Failed to configure {DEFAULT_AP_INTERFACE}; the interface was rolled back"
@@ -342,11 +344,12 @@ where
         }
     }
 
-    async fn configure_ap_interface(&self) -> Result<()> {
-        // NetworkManager notices newly-created Wi-Fi interfaces immediately
-        // and may bring this one down while hostapd is configuring it. Only
-        // release Wiretray's virtual interface; the parent client interface
-        // remains managed and connected.
+    async fn configure_ap_interface(&self, parent_interface: &str) -> Result<()> {
+        // NetworkManager remembers this interface name after the first session
+        // and can claim it again in the gap after `iw interface add`. Reserve
+        // it, and give it a MAC distinct from the connected client, before
+        // hostapd opens it. Opening an `__ap` interface here with `ip link
+        // set up` races that claim and returns EBUSY on the next start.
         self.command_runner
             .run(
                 "nmcli",
@@ -354,6 +357,24 @@ where
             )
             .await
             .context("Failed to reserve the AP interface for hostapd")?;
+        self.wait_until_ap_interface_unmanaged().await?;
+
+        let parent_mac = self.read_interface_mac(parent_interface).await?;
+        let ap_mac = format_mac(&locally_administered_mac(&parent_mac));
+        self.command_runner
+            .run(
+                "ip",
+                &[
+                    "link",
+                    "set",
+                    "dev",
+                    DEFAULT_AP_INTERFACE,
+                    "address",
+                    &ap_mac,
+                ],
+            )
+            .await
+            .context("Failed to assign a distinct MAC address to the AP interface")?;
 
         self.command_runner
             .run(
@@ -369,12 +390,50 @@ where
             .await
             .context("Failed to assign the AP address")?;
 
-        self.command_runner
-            .run("ip", &["link", "set", "dev", DEFAULT_AP_INTERFACE, "up"])
-            .await
-            .context("Failed to bring the AP interface up")?;
-
         Ok(())
+    }
+
+    async fn wait_until_ap_interface_unmanaged(&self) -> Result<()> {
+        const ATTEMPTS: usize = 10;
+        const INTERVAL: Duration = Duration::from_millis(100);
+
+        for attempt in 0..ATTEMPTS {
+            let output = self
+                .command_runner
+                .run(
+                    "nmcli",
+                    &[
+                        "-g",
+                        "GENERAL.STATE",
+                        "device",
+                        "show",
+                        DEFAULT_AP_INTERFACE,
+                    ],
+                )
+                .await
+                .context("Failed to read the AP interface state from NetworkManager")?;
+
+            if is_unmanaged_device_state(&output.stdout) {
+                return Ok(());
+            }
+
+            if attempt + 1 < ATTEMPTS {
+                tokio::time::sleep(INTERVAL).await;
+            }
+        }
+
+        bail!("NetworkManager kept managing {DEFAULT_AP_INTERFACE} after it was set unmanaged")
+    }
+
+    async fn read_interface_mac(&self, interface: &str) -> Result<[u8; 6]> {
+        let output = self
+            .command_runner
+            .run("ip", &["link", "show", "dev", interface])
+            .await
+            .with_context(|| format!("Failed to read the MAC address of {interface}"))?;
+
+        parse_mac_address(&output.stdout)
+            .with_context(|| format!("Failed to parse the MAC address of {interface}"))
     }
 
     async fn delete_ap_interface(&self) -> Result<()> {
@@ -385,6 +444,63 @@ where
 
         Ok(())
     }
+}
+
+fn is_unmanaged_device_state(stdout: &str) -> bool {
+    stdout
+        .split(|character: char| character.is_whitespace() || matches!(character, '(' | ')'))
+        .any(|token| {
+            let token = token.trim();
+            token.eq_ignore_ascii_case("unmanaged") || token == "10"
+        })
+}
+
+fn parse_mac_address(output: &str) -> Result<[u8; 6]> {
+    output
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            let mac = line
+                .strip_prefix("link/ether ")
+                .or_else(|| line.strip_prefix("addr "))?;
+            let mac = mac.split_whitespace().next()?;
+            parse_mac_octets(mac).ok()
+        })
+        .context("Could not read a MAC address")
+}
+
+fn parse_mac_octets(mac: &str) -> Result<[u8; 6]> {
+    let mut octets = [0; 6];
+    let mut parts = mac.split(':');
+
+    for octet in &mut octets {
+        let part = parts.next().context("MAC address is incomplete")?;
+        if part.len() != 2 {
+            bail!("MAC address octet is invalid");
+        }
+        *octet = u8::from_str_radix(part, 16).context("MAC address octet is invalid")?;
+    }
+
+    if parts.next().is_some() {
+        bail!("MAC address has too many octets");
+    }
+
+    Ok(octets)
+}
+
+/// Locally administered unicast MAC, always different from the parent client.
+fn locally_administered_mac(parent: &[u8; 6]) -> [u8; 6] {
+    let mut mac = *parent;
+    mac[0] = (mac[0] | 0x02) & !0x01;
+    mac[5] = mac[5].wrapping_add(1);
+    mac
+}
+
+fn format_mac(mac: &[u8; 6]) -> String {
+    format!(
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    )
 }
 
 fn build_hostapd_config(hotspot: &HotspotConfig, radio: ApRadioConfig) -> Result<String> {
@@ -633,11 +749,15 @@ mod tests {
 
     impl ScriptedCommandRunner {
         fn with_exit_codes(exit_codes: impl IntoIterator<Item = i32>) -> Self {
-            let outputs = exit_codes
+            Self::with_results(exit_codes.into_iter().map(|code| (code, String::new())))
+        }
+
+        fn with_results(results: impl IntoIterator<Item = (i32, String)>) -> Self {
+            let outputs = results
                 .into_iter()
-                .map(|code| CommandOutput {
+                .map(|(code, stdout)| CommandOutput {
                     status: ExitStatus::from_raw(code << 8),
-                    stdout: String::new(),
+                    stdout,
                     stderr: if code != 0 {
                         "scripted failure".to_string()
                     } else {
@@ -747,6 +867,21 @@ mod tests {
                 ("iw", ["dev", "wlp3s0", "link"]) => {
                     stdout = "Connected to 00:11:22:33:44:55\n\tfreq: 2437\n".into();
                 }
+                ("ip", ["link", "show", "dev", "wlp3s0"]) => {
+                    stdout = "    link/ether 00:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff\n".into();
+                }
+                (
+                    "nmcli",
+                    [
+                        "-g",
+                        "GENERAL.STATE",
+                        "device",
+                        "show",
+                        DEFAULT_AP_INTERFACE,
+                    ],
+                ) => {
+                    stdout = "10 (unmanaged)\n".into();
+                }
                 ("ip", ["link", "show", "dev", DEFAULT_AP_INTERFACE]) => {
                     status = i32::from(!self.interface_exists.load(Ordering::SeqCst));
                 }
@@ -820,7 +955,18 @@ mod tests {
 
     #[tokio::test]
     async fn creates_and_configures_ap_interface_in_order() {
-        let runner = ScriptedCommandRunner::with_exit_codes([1, 0, 0, 0, 0]);
+        let runner = ScriptedCommandRunner::with_results([
+            (1, String::new()),
+            (0, String::new()),
+            (0, String::new()),
+            (0, "10 (unmanaged)\n".into()),
+            (
+                0,
+                "    link/ether 00:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff\n".into(),
+            ),
+            (0, String::new()),
+            (0, String::new()),
+        ]);
         let backend = ConcurrentApBackend::with_runner(runner, RuntimePaths::discover());
 
         backend.create_ap_interface("wlp3s0").await.unwrap();
@@ -858,15 +1004,36 @@ mod tests {
                         .collect(),
                 ),
                 (
-                    "ip".into(),
-                    vec!["address", "add", "192.168.50.1/24", "dev", "wiretray-ap0"]
+                    "nmcli".into(),
+                    vec!["-g", "GENERAL.STATE", "device", "show", "wiretray-ap0",]
                         .into_iter()
                         .map(String::from)
                         .collect(),
                 ),
                 (
                     "ip".into(),
-                    vec!["link", "set", "dev", "wiretray-ap0", "up"]
+                    vec!["link", "show", "dev", "wlp3s0"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                ),
+                (
+                    "ip".into(),
+                    vec![
+                        "link",
+                        "set",
+                        "dev",
+                        "wiretray-ap0",
+                        "address",
+                        "02:11:22:33:44:56",
+                    ]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ),
+                (
+                    "ip".into(),
+                    vec!["address", "add", "192.168.50.1/24", "dev", "wiretray-ap0"]
                         .into_iter()
                         .map(String::from)
                         .collect(),
@@ -1121,6 +1288,23 @@ mod tests {
         let output = "default via 10.0.0.1 dev enp2s0 proto dhcp metric 100\n";
 
         assert_eq!(parse_default_route_interface(output).unwrap(), "enp2s0");
+    }
+
+    #[test]
+    fn derives_a_locally_administered_mac_distinct_from_the_parent() {
+        let parent = parse_mac_octets("00:11:22:33:44:55").unwrap();
+
+        let mac = locally_administered_mac(&parent);
+
+        assert_eq!(format_mac(&mac), "02:11:22:33:44:56");
+        assert_ne!(mac, parent);
+        assert_eq!(mac[0] & 0x03, 0x02);
+    }
+
+    #[test]
+    fn treats_networkmanager_state_10_as_unmanaged() {
+        assert!(is_unmanaged_device_state("10 (unmanaged)\n"));
+        assert!(!is_unmanaged_device_state("100 (connected)\n"));
     }
 
     #[test]
